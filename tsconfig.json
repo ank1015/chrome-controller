@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/protocol/**/*", "src/sdk/**/*", "src/native/**/*", "src/index.ts"],
+  "exclude": ["node_modules", "dist", "src/chrome/**/*", "**/*.test.ts"]
+}

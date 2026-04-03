@@ -1,0 +1,26 @@
+export { WebBrowser, WebDebuggerSession, WebTab, connectWeb, withWebBrowser } from './web.js';
+
+export type {
+  ConnectWebOptions,
+  WebBrowserTabQuery,
+  WebCaptureNetworkOptions,
+  WebDebuggerEvent,
+  WebDebuggerEventFilter,
+  WebDownloadFilter,
+  WebDownloadInfo,
+  WebDownloadWaitOptions,
+  WebEvaluateOptions,
+  WebFindTabsPredicate,
+  WebNetworkCapture,
+  WebNetworkCaptureAction,
+  WebNetworkRequest,
+  WebNetworkSummary,
+  WebOpenTabOptions,
+  WebScreenshotFormat,
+  WebScreenshotOptions,
+  WebScreenshotResult,
+  WebTabInfo,
+  WebUploadFilesResult,
+  WebWaitForOptions,
+  WebWaitPredicate,
+} from './web.js';

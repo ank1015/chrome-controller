@@ -1,0 +1,7 @@
+{
+  "name": "com.ank1015.llm",
+  "description": "LLM native messaging host",
+  "path": "__HOST_EXECUTABLE_PATH__",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://__EXTENSION_ID__/"]
+}

@@ -1,0 +1,67 @@
+{
+  "name": "@ank1015/llm-extension",
+  "version": "0.0.13",
+  "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and Node client",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": "./dist/sdk/cli.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "manifests",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node ./scripts/clean.mjs && pnpm build:native && pnpm build:chrome",
+    "build:native": "tsc && node ./scripts/copy-build-asset.mjs native",
+    "build:chrome": "tsx esbuild.config.ts && node ./scripts/copy-build-asset.mjs chrome",
+    "dev": "node ../../scripts/run-parallel.mjs \"pnpm dev:native\" \"pnpm dev:chrome\"",
+    "dev:native": "tsc --watch",
+    "dev:chrome": "tsx esbuild.config.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src esbuild.config.ts",
+    "clean": "node ./scripts/clean.mjs",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.0",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0"
+  },
+  "keywords": [
+    "chrome",
+    "rpc",
+    "chrome-rpc",
+    "extension",
+    "native-messaging",
+    "automation",
+    "typescript",
+    "chrome-extension",
+    "llm"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ank1015/llm.git",
+    "directory": "packages/extension"
+  },
+  "homepage": "https://github.com/ank1015/llm/tree/main/packages/extension",
+  "bugs": {
+    "url": "https://github.com/ank1015/llm/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
