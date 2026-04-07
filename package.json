@@ -1,11 +1,13 @@
 {
   "name": "@ank1015/llm-extension",
-  "version": "0.0.13",
-  "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and Node client",
+  "version": "0.0.14",
+  "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and CLI",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": "./dist/sdk/cli.js",
+  "bin": {
+    "chrome-controller": "./dist/native-cli/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -22,7 +24,10 @@
   "scripts": {
     "build": "node ./scripts/clean.mjs && pnpm build:native && pnpm build:chrome",
     "build:native": "tsc && node ./scripts/copy-build-asset.mjs native",
-    "build:chrome": "tsx esbuild.config.ts && node ./scripts/copy-build-asset.mjs chrome",
+    "build:chrome": "tsx esbuild.config.ts && node ./scripts/generate-chrome-icons.mjs && node ./scripts/copy-build-asset.mjs chrome",
+    "package:chrome-webstore": "pnpm build:chrome && node ./scripts/package-chrome-extension.mjs",
+    "test": "vitest run",
+    "test:chrome-bridge": "pnpm build && node ./scripts/check-chrome-bridge.mjs",
     "dev": "node ../../scripts/run-parallel.mjs \"pnpm dev:native\" \"pnpm dev:chrome\"",
     "dev:native": "tsc --watch",
     "dev:chrome": "tsx esbuild.config.ts --watch",
@@ -33,9 +38,10 @@
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^2.1.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "^2.1.0",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
@@ -63,5 +69,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "turndown": "^7.2.4"
   }
 }

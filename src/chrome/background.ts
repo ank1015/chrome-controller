@@ -6,6 +6,11 @@
  */
 
 import { NATIVE_HOST_NAME } from '../protocol/constants.js';
+import {
+  clearTrackedDebuggerSession,
+  ensureTrackedDebuggerSession,
+  sendTrackedDebuggerCommand,
+} from './debugger-session.js';
 
 import type {
   HostMessage,
@@ -251,19 +256,17 @@ function handleDebuggerEvent(
   }
 }
 
+function handleDebuggerDetach(source: chrome.debugger.Debuggee): void {
+  clearTrackedDebuggerSession(debuggerSessions, source);
+}
+
 // Register the global listener once
 chrome.debugger.onEvent.addListener(handleDebuggerEvent);
+chrome.debugger.onDetach.addListener(handleDebuggerDetach);
 
 async function debuggerAttach(args: unknown[]): Promise<unknown> {
   const { tabId } = args[0] as { tabId: number };
-
-  if (debuggerSessions.has(tabId)) {
-    return { alreadyAttached: true };
-  }
-
-  await chrome.debugger.attach({ tabId }, '1.3');
-  debuggerSessions.set(tabId, { events: [] });
-  return { attached: true };
+  return await ensureTrackedDebuggerSession(chrome.debugger, debuggerSessions, tabId);
 }
 
 async function debuggerSendCommand(args: unknown[]): Promise<unknown> {
@@ -272,12 +275,13 @@ async function debuggerSendCommand(args: unknown[]): Promise<unknown> {
     method: string;
     params?: object;
   };
-
-  if (!debuggerSessions.has(tabId)) {
-    throw new Error(`No debugger session for tab ${tabId} — call debugger.attach first`);
-  }
-
-  return chrome.debugger.sendCommand({ tabId }, method, params);
+  return await sendTrackedDebuggerCommand(
+    chrome.debugger,
+    debuggerSessions,
+    tabId,
+    method,
+    params
+  );
 }
 
 async function debuggerDetach(args: unknown[]): Promise<unknown> {

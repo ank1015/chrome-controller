@@ -1,9 +1,14 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src/protocol/**/*", "src/sdk/**/*", "src/native/**/*", "src/index.ts"],
+  "include": [
+    "src/protocol/**/*",
+    "src/native/**/*",
+    "src/native-cli/**/*",
+    "src/index.ts"
+  ],
   "exclude": ["node_modules", "dist", "src/chrome/**/*", "**/*.test.ts"]
 }
