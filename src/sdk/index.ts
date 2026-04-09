@@ -1,26 +1,10 @@
-export { WebBrowser, WebDebuggerSession, WebTab, connectWeb, withWebBrowser } from './web.js';
+export { connectChromeController } from './controller.js';
 
 export type {
-  ConnectWebOptions,
-  WebBrowserTabQuery,
-  WebCaptureNetworkOptions,
-  WebDebuggerEvent,
-  WebDebuggerEventFilter,
-  WebDownloadFilter,
-  WebDownloadInfo,
-  WebDownloadWaitOptions,
-  WebEvaluateOptions,
-  WebFindTabsPredicate,
-  WebNetworkCapture,
-  WebNetworkCaptureAction,
-  WebNetworkRequest,
-  WebNetworkSummary,
-  WebOpenTabOptions,
-  WebScreenshotFormat,
-  WebScreenshotOptions,
-  WebScreenshotResult,
-  WebTabInfo,
-  WebUploadFilesResult,
-  WebWaitForOptions,
-  WebWaitPredicate,
-} from './web.js';
+  ChromeController,
+  ChromeControllerConnectOptions,
+  ChromeControllerDebuggerApi,
+  ChromeDebuggerEventsOptions,
+  ChromeDebuggerSession,
+  ChromeEvaluateOptions,
+} from './types.js';

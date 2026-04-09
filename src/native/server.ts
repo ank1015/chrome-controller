@@ -11,8 +11,8 @@ import type {
   UnsubscribeMessage,
   ChromeMessage,
 } from '../protocol/types.js';
-import type { ChromeClient } from '../sdk/core/client.js';
 import type { Server, Socket } from 'node:net';
+import type { ChromeClient } from './client.js';
 
 export interface ChromeServerOptions {
   port?: number;

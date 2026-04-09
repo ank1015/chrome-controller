@@ -1,11 +1,13 @@
 {
-  "name": "@ank1015/llm-extension",
-  "version": "0.0.13",
-  "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and Node client",
+  "name": "@ank1015/chrome-controller",
+  "version": "0.0.1",
+  "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and CLI",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": "./dist/sdk/cli.js",
+  "bin": {
+    "chrome-controller": "./dist/native-cli/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -21,8 +23,13 @@
   ],
   "scripts": {
     "build": "node ./scripts/clean.mjs && pnpm build:native && pnpm build:chrome",
-    "build:native": "tsc && node ./scripts/copy-build-asset.mjs native",
-    "build:chrome": "tsx esbuild.config.ts && node ./scripts/copy-build-asset.mjs chrome",
+    "build:native": "tsc && node ./scripts/ensure-native-cli-bin.mjs && node ./scripts/copy-build-asset.mjs native",
+    "build:chrome": "tsx esbuild.config.ts && node ./scripts/generate-chrome-icons.mjs && node ./scripts/copy-build-asset.mjs chrome",
+    "package:chrome-webstore": "pnpm build:chrome && node ./scripts/package-chrome-extension.mjs",
+    "test": "vitest run",
+    "test:find-live": "pnpm exec tsc && CHROME_CONTROLLER_RUN_LIVE_FIND_TESTS=1 vitest run tests/live/native-cli/find-live.test.ts",
+    "test:sdk-live": "CHROME_CONTROLLER_RUN_LIVE_SDK_TESTS=1 vitest run tests/live/sdk/controller-live.test.ts",
+    "test:chrome-bridge": "pnpm build && node ./scripts/check-chrome-bridge.mjs",
     "dev": "node ../../scripts/run-parallel.mjs \"pnpm dev:native\" \"pnpm dev:chrome\"",
     "dev:native": "tsc --watch",
     "dev:chrome": "tsx esbuild.config.ts --watch",
@@ -30,12 +37,13 @@
     "lint": "eslint src esbuild.config.ts",
     "clean": "node ./scripts/clean.mjs",
     "prepack": "pnpm run build",
-    "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
+    "prepublishOnly": "node ./scripts/ensure-pnpm-publish.mjs"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^2.1.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "^2.1.0",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
@@ -54,14 +62,17 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ank1015/llm.git",
-    "directory": "packages/extension"
+    "url": "git+https://github.com/ank1015/chrome-controller.git"
   },
-  "homepage": "https://github.com/ank1015/llm/tree/main/packages/extension",
+  "homepage": "https://github.com/ank1015/chrome-controller",
   "bugs": {
-    "url": "https://github.com/ank1015/llm/issues"
+    "url": "https://github.com/ank1015/chrome-controller/issues"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@ank1015/llm-sdk": "^0.0.4",
+    "turndown": "^7.2.4"
   }
 }
