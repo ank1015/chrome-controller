@@ -1,22 +1,38 @@
-# Chrome Controller CLI Guide
+# Chrome Controller Guide
 
-This folder explains how to drive Chrome entirely through the `chrome-controller` CLI.
+This folder explains how to control Chrome with the `chrome-controller` CLI and how to build repeatable scripts with the SDK.
 
-The docs are written for an agent or user who starts with no project context and just needs to control the browser by running commands.
+The main workflow is:
+
+- use the CLI to explore and understand the page
+- use the SDK to automate the parts that repeat
 
 ## What this CLI gives you
 
 You can use the CLI to:
 
 - manage browser sessions
+- safely open or reuse a working tab with `open --ready`
 - inspect and rearrange windows and tabs
 - navigate pages
 - turn pages into markdown
+- semantically narrow large pages down with `find`
 - snapshot interactive elements and act on them with refs like `@e1`
 - type, click, wait, drag, and upload files
 - capture console output, network traffic, screenshots, and PDFs
 - manage cookies, storage, and downloads
 - drop down to raw Chrome DevTools Protocol commands when needed
+
+## What the SDK gives you
+
+You can use the SDK to:
+
+- connect once and keep a persistent browser bridge open
+- call raw browser APIs directly
+- evaluate JavaScript inside tabs
+- attach debugger sessions and send CDP commands
+- subscribe to raw browser events
+- turn an explored browser task into a script you can run again later
 
 ## Safety model
 
@@ -31,6 +47,7 @@ The safest mental model is:
 A session only tracks CLI state such as:
 
 - the current `sessionId`
+- an optional pinned target tab for page-level commands
 - snapshot caches and `@eN` refs
 - command routing when you omit `--session`
 
@@ -43,19 +60,26 @@ A session does not create:
 
 So a brand new session can still control your already-open Chrome windows and tabs.
 
-If you want safety, get an explicit `tabId` early and keep using `--tab`.
+If you want safety, pin a target tab early with `open --ready` or `tabs target set`.
 
 ## Command shape
 
-Every command starts with:
+Most commands use:
 
 ```bash
 chrome-controller <group> <command> [options]
 ```
 
+The safe browser-entry command is top-level:
+
+```bash
+chrome-controller open <url> [options]
+```
+
 Examples:
 
 ```bash
+chrome-controller open https://example.com --ready
 chrome-controller tabs list
 chrome-controller page goto https://example.com
 chrome-controller page snapshot
@@ -109,13 +133,30 @@ Examples:
 
 ### 3. Tab default
 
-Most page, element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, and upload commands default to the active tab in the current window when `--tab` is omitted.
+Most page, element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, upload, and `find` commands use the session's pinned target tab when `--tab` is omitted.
 
-That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active unless you pin them to a tab id with `--tab`.
+If the session does not have a pinned target tab yet, they fall back to the active tab in the current window.
+
+That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active unless you pin a working tab first or pass `--tab`.
 
 ## Safer starting pattern
 
 If you are about to do real work in a browser that already has personal or unrelated tabs open, use this pattern instead of jumping straight to `page goto`:
+
+```bash
+chrome-controller open https://example.com --ready --json
+chrome-controller page url
+chrome-controller page title
+```
+
+This is safer because:
+
+- `open` defaults to `--active=false`
+- it pins the opened or reused tab into the session
+- `--ready` waits for stable page readiness before returning
+- later page-level commands follow that pinned target by default
+
+Manual fallback:
 
 ```bash
 chrome-controller tabs list --json
@@ -124,52 +165,49 @@ chrome-controller page url --tab <tabId>
 chrome-controller page title --tab <tabId>
 ```
 
-Then keep using that explicit tab id:
+Then keep using that explicit tab id, or pin it:
 
 ```bash
+chrome-controller tabs target set <tabId>
 chrome-controller page snapshot --tab <tabId>
 chrome-controller element click @e3 --tab <tabId>
 ```
-
-This is safer because:
-
-- `page goto` without `--tab` can replace the active tab
-- `tabs open` may still become the active tab depending on Chrome behavior unless you pass `--active=false`
-- once you have a `tabId`, later commands can target it explicitly
 
 ## How to interact with a page
 
 For most tasks, the best loop is:
 
-1. open or choose the right tab
+1. use `open --ready` to open the page or reuse an already-open exact URL match and pin it into the session
 2. verify the tab with `page url` or `page title`
 3. navigate if needed
-4. run `page snapshot`
-5. act on `@eN` refs with `element ...`
-6. wait for the page to settle with `wait ...`
-7. run `page snapshot` again if the page changed
+4. run `find` when you want a semantic shortlist first
+5. run `page snapshot` when you want the raw interactive structure
+6. act on `@eN` refs with `element ...`
+7. wait for the page to settle with `wait ...`
+8. run `page snapshot` again if the page changed
 
 Safer example:
 
 ```bash
-chrome-controller tabs open https://example.com/login --active=false --json
-chrome-controller page url --tab 456
-chrome-controller page title --tab 456
-chrome-controller page snapshot --tab 456
-chrome-controller element fill @e1 alice@example.com --tab 456
-chrome-controller element fill @e2 supersecret --tab 456
-chrome-controller element click @e3 --tab 456
-chrome-controller wait load --tab 456
-chrome-controller page snapshot --tab 456
+chrome-controller open https://example.com/login --ready --json
+chrome-controller page url
+chrome-controller page title
+chrome-controller page snapshot
+chrome-controller element fill @e1 alice@example.com
+chrome-controller element fill @e2 supersecret
+chrome-controller element click @e3
+chrome-controller wait stable
+chrome-controller page snapshot
 ```
 
 Fast loop when you are already sure about the target tab:
 
 1. navigate to the page
-2. run `page snapshot`
-3. act on `@eN` refs with `element ...`
-4. wait for the page to settle with `wait ...`
-5. run `page snapshot` again if the page changed
+2. run `find` if you want likely candidates instead of the whole page
+3. run `page snapshot`
+4. act on `@eN` refs with `element ...`
+5. wait for the page to settle with `wait ...`
+6. run `page snapshot` again if the page changed
 
 Example:
 
@@ -226,23 +264,33 @@ Then feed the returned center or edges into `mouse move`, `mouse click`, or `mou
 - [01 - Sessions, Windows, and Tabs](./01-sessions-windows-tabs.md)
   What sessions are, how defaults work, and how to inspect or rearrange browser state.
 - [02 - Pages, Snapshots, and Interaction](./02-pages-snapshots-and-interaction.md)
-  How to navigate, read page content, create snapshots, act on elements, type, click, drag, and wait.
+  How to navigate, read page content, use `find`, create snapshots, act on elements, type, click, drag, and wait.
 - [03 - Debugging, Network, Console, and Capture](./03-debugging-network-console-and-capture.md)
   How to attach the debugger, inspect events, capture network requests, read console logs, and take screenshots or PDFs.
 - [04 - State, Cookies, Uploads, and Downloads](./04-state-cookies-uploads-and-downloads.md)
   How to save state, restore state, manage cookies, upload files, and wait for downloads.
 - [05 - Recipes](./05-recipes.md)
   Step-by-step patterns for common tasks like safe navigation, login flows, inbox scraping, prompt submission, network inspection, uploads, and downloads.
+- [06 - SDK Automation Workflows](./06-sdk-automation-workflows.md)
+  How to use the TypeScript SDK for repeatable scripts, browser workflows, `evaluate`, debugger sessions, and automation structure.
 
 ## Quick recipes
 
 ### Open a site and inspect its page
 
 ```bash
-chrome-controller tabs open https://example.com --active=false --json
-chrome-controller page title --tab 456
-chrome-controller page text --tab 456
-chrome-controller page snapshot --tab 456
+chrome-controller open https://example.com --ready --json
+chrome-controller page title
+chrome-controller find "main heading and primary action"
+chrome-controller page text
+chrome-controller page snapshot
+```
+
+### Narrow a large page before clicking
+
+```bash
+chrome-controller find "search box and search button" --limit 20
+chrome-controller element click @e5
 ```
 
 ### Click a button found by snapshot

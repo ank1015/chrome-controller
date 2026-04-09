@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { ChromeBrowserService } from './browser-service.js';
+import { isCliPartialResultError } from './command-error.js';
+import { isDetachedEvaluationError } from './interaction-support.js';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +16,11 @@ import { runTabsCommand } from './commands/tabs.js';
 import { runUploadCommand } from './commands/upload.js';
 import { runConsoleCommand } from './commands/console.js';
 import { runElementCommand } from './commands/element.js';
+import { runFindCommand } from './commands/find.js';
 import { runNetworkCommand } from './commands/network.js';
 import { runKeyboardCommand } from './commands/keyboard.js';
 import { runMouseCommand } from './commands/mouse.js';
+import { runOpenCommand } from './commands/open.js';
 import { runPageCommand } from './commands/page.js';
 import { runScreenshotCommand } from './commands/screenshot.js';
 import { runWaitCommand } from './commands/wait.js';
@@ -149,6 +153,14 @@ async function dispatchCommand(
         browserService: context.browserService ?? new ChromeBrowserService(),
         env: context.env,
       });
+    case 'find':
+      return await runFindCommand({
+        args,
+        explicitSessionId: context.explicitSessionId,
+        sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
+        env: context.env,
+      });
     case 'downloads':
       return await runDownloadsCommand({
         args,
@@ -172,6 +184,13 @@ async function dispatchCommand(
       });
     case 'network':
       return await runNetworkCommand({
+        args,
+        explicitSessionId: context.explicitSessionId,
+        sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
+      });
+    case 'open':
+      return await runOpenCommand({
         args,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
@@ -278,13 +297,26 @@ function writeError(
   json: boolean,
   error: unknown
 ): void {
+  const partialResult = isCliPartialResultError(error) ? error.result : null;
   const message = normalizeErrorMessage(error);
 
   if (json) {
-    stdout.write(
-      `${JSON.stringify({ success: false, error: message }, null, 2)}\n`
-    );
+    stdout.write(`${JSON.stringify({
+      success: false,
+      error: message,
+      ...(partialResult
+        ? {
+            sessionId: partialResult.session?.id ?? null,
+            data: partialResult.data ?? null,
+            partial: true,
+          }
+        : {}),
+    }, null, 2)}\n`);
     return;
+  }
+
+  if (partialResult?.lines && partialResult.lines.length > 0) {
+    writeLines(stdout, partialResult.lines);
   }
 
   stderr.write(`${message}\n`);
@@ -292,9 +324,8 @@ function writeError(
 
 function normalizeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const lowerMessage = message.toLowerCase();
 
-  if (lowerMessage.includes('detached') || lowerMessage.includes('debugger is not attached')) {
+  if (isDetachedEvaluationError(error)) {
     return 'The page changed while the command was running. Wait for the page to settle, and if you are using snapshot refs run `chrome-controller page snapshot` again before retrying.';
   }
 
@@ -336,9 +367,11 @@ function createHelpLines(): string[] {
     '  debugger  Control Chrome DevTools Protocol sessions',
     '  downloads Inspect and manage browser downloads',
     '  element   Interact with page elements using selectors or @refs',
+    '  find      Build an LLM-friendly page model for semantic lookup',
     '  keyboard  Send keyboard input to the active tab',
     '  mouse     Send mouse input to the active tab',
     '  network   Capture and control browser network traffic',
+    '  open      Safely open or reuse a matching tab and pin it to the session',
     '  page      Navigate and inspect basic page metadata',
     '  screenshot Capture page screenshots',
     '  session   Manage CLI sessions',

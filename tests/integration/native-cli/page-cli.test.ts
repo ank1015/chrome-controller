@@ -295,6 +295,39 @@ describe('native CLI page commands', () => {
     });
   });
 
+  it('uses the session pinned target tab when no explicit --tab is provided', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    await runCliCommand(
+      ['tabs', 'target', 'set', '102', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    browserService.calls.length = 0;
+
+    const titleOutcome = await runCliCommand(
+      ['page', 'title', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(titleOutcome.stdout);
+
+    expect(titleOutcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tabId: 102,
+      title: 'Docs',
+    });
+    expect(browserService.calls).toEqual([
+      {
+        method: 'getTab',
+        sessionId: 'alpha',
+        payload: 102,
+      },
+    ]);
+  });
+
   it('navigates the current active tab when no --tab is provided', async () => {
     const outcome = await runCliCommand(
       ['page', 'goto', 'https://openai.com', '--json'],

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -104,5 +104,52 @@ describe('SessionStore', () => {
     expect(outcome.session?.id).toBe('alpha');
     expect(await sessionStore.getCurrentSession()).toBeNull();
     expect(await sessionStore.listSessions()).toEqual([]);
+  });
+
+  it('retries transient JSON parse failures when reading an explicit session', async () => {
+    const sessionStore = new SessionStore({
+      env: { ...process.env, CHROME_CONTROLLER_HOME: tempHome },
+      now: createNowGenerator(),
+    });
+
+    await sessionStore.createSession('alpha');
+    const sessionPath = sessionStore.getSessionPath('alpha');
+    const validSessionJson = await readFile(sessionPath, 'utf8');
+
+    await writeFile(sessionPath, '{"id":"alpha"', 'utf8');
+
+    const restorePromise = new Promise<void>((resolve, reject) => {
+      setTimeout(() => {
+        writeFile(sessionPath, validSessionJson, 'utf8').then(
+          () => resolve(),
+          (error) => reject(error)
+        );
+      }, 5);
+    });
+
+    const resolved = await sessionStore.resolveSession('alpha');
+    await restorePromise;
+
+    expect(resolved.session.id).toBe('alpha');
+    expect(resolved.source).toBe('explicit');
+  });
+
+  it('persists and clears a pinned target tab on the session record', async () => {
+    const sessionStore = new SessionStore({
+      env: { ...process.env, CHROME_CONTROLLER_HOME: tempHome },
+      now: createNowGenerator(),
+    });
+
+    await sessionStore.createSession('alpha');
+
+    const pinned = await sessionStore.setTargetTab('alpha', 102);
+    const afterPin = await sessionStore.getSession('alpha');
+    const cleared = await sessionStore.clearTargetTab('alpha');
+    const afterClear = await sessionStore.getSession('alpha');
+
+    expect(pinned.targetTabId).toBe(102);
+    expect(afterPin?.targetTabId).toBe(102);
+    expect(cleared.targetTabId).toBeNull();
+    expect(afterClear?.targetTabId).toBeNull();
   });
 });

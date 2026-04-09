@@ -48,6 +48,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     [102, createTab({ id: 102, windowId: 11, active: false, title: 'Docs', url: 'https://docs.example.com', index: 1 })],
     [201, createTab({ id: 201, windowId: 22, active: true, title: 'Other', url: 'https://other.example.com' })],
   ]);
+  private readonly delayedListVisibility = new Map<number, number>();
 
   private nextTabId = 300;
 
@@ -89,15 +90,16 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     });
 
     const tabs = [...this.tabs.values()];
-    if (options.windowId !== undefined) {
-      return tabs.filter((tab) => tab.windowId === options.windowId).map((tab) => ({ ...tab }));
-    }
+    const matchingTabs =
+      options.windowId !== undefined
+        ? tabs.filter((tab) => tab.windowId === options.windowId)
+        : options.currentWindow === false || options.currentWindow === undefined
+          ? tabs
+          : tabs.filter((tab) => tab.windowId === 11);
 
-    if (options.currentWindow === false || options.currentWindow === undefined) {
-      return tabs.map((tab) => ({ ...tab }));
-    }
-
-    return tabs.filter((tab) => tab.windowId === 11).map((tab) => ({ ...tab }));
+    return matchingTabs
+      .filter((tab) => this.shouldIncludeTabInList(tab.id as number))
+      .map((tab) => ({ ...tab }));
   }
 
   async openTab(session: CliSessionRecord, options: CliOpenTabOptions): Promise<CliTabInfo> {
@@ -125,6 +127,9 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       index: 99,
     });
     this.tabs.set(tab.id as number, tab);
+    if (options.url === 'https://eventual.example.com') {
+      this.delayedListVisibility.set(tab.id as number, 1);
+    }
     return tab;
   }
 
@@ -342,6 +347,16 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
   private requireTab(tabId: number): CliTabInfo {
     return { ...this.requireStoredTab(tabId) };
   }
+
+  private shouldIncludeTabInList(tabId: number): boolean {
+    const remainingHiddenListCalls = this.delayedListVisibility.get(tabId) ?? 0;
+    if (remainingHiddenListCalls <= 0) {
+      return true;
+    }
+
+    this.delayedListVisibility.set(tabId, remainingHiddenListCalls - 1);
+    return false;
+  }
 }
 
 async function runCliCommand(
@@ -444,6 +459,51 @@ describe('native CLI tabs commands', () => {
     });
   });
 
+  it('sets, shows, and clears a pinned target tab for the session', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+
+    const set = await runCliCommand(
+      ['tabs', 'target', 'set', '102', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const show = await runCliCommand(
+      ['tabs', 'target', 'show', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const clear = await runCliCommand(
+      ['tabs', 'target', 'clear', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    const setPayload = JSON.parse(set.stdout);
+    const showPayload = JSON.parse(show.stdout);
+    const clearPayload = JSON.parse(clear.stdout);
+
+    expect(set.exitCode).toBe(0);
+    expect(show.exitCode).toBe(0);
+    expect(clear.exitCode).toBe(0);
+    expect(setPayload.sessionId).toBe('alpha');
+    expect(setPayload.data.targetTabId).toBe(102);
+    expect(showPayload.data).toEqual({
+      targetTabId: 102,
+      tab: expect.objectContaining({
+        id: 102,
+        url: 'https://docs.example.com',
+      }),
+      stale: false,
+    });
+    expect(clearPayload.data).toEqual({
+      clearedTargetTabId: 102,
+      targetTabId: null,
+    });
+  });
+
   it('opens a tab with parsed options', async () => {
     const outcome = await runCliCommand(
       [
@@ -487,7 +547,7 @@ describe('native CLI tabs commands', () => {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: false,
+          windowId: 22,
         },
       },
       {
@@ -498,6 +558,99 @@ describe('native CLI tabs commands', () => {
           windowId: 22,
           active: false,
           pinned: true,
+        },
+      },
+      {
+        method: 'listTabs',
+        sessionId: 's1',
+        payload: {
+          currentWindow: false,
+        },
+      },
+    ]);
+  });
+
+  it('waits for a newly opened tab to appear in all-tabs listings before returning', async () => {
+    const open = await runCliCommand(
+      ['tabs', 'open', 'https://eventual.example.com', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const list = await runCliCommand(
+      ['tabs', 'list', '--all', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    const openPayload = JSON.parse(open.stdout);
+    const listPayload = JSON.parse(list.stdout);
+
+    expect(open.exitCode).toBe(0);
+    expect(openPayload.data.tab.id).toBe(300);
+    expect(list.exitCode).toBe(0);
+    expect(listPayload.data.count).toBe(4);
+    expect(listPayload.data.tabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 300,
+          url: 'https://eventual.example.com',
+        }),
+      ])
+    );
+  });
+
+  it('opens a tab with a named session created via the global --session flag', async () => {
+    const create = await runCliCommand(
+      ['session', 'create', '--session', 'linkedin-dm-task1', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const open = await runCliCommand(
+      [
+        'tabs',
+        'open',
+        'https://www.linkedin.com/messaging/',
+        '--active=false',
+        '--session',
+        'linkedin-dm-task1',
+        '--json',
+      ],
+      tempHome,
+      browserService,
+      now
+    );
+
+    const createPayload = JSON.parse(create.stdout);
+    const openPayload = JSON.parse(open.stdout);
+
+    expect(create.exitCode).toBe(0);
+    expect(createPayload.sessionId).toBe('linkedin-dm-task1');
+    expect(open.exitCode).toBe(0);
+    expect(openPayload.sessionId).toBe('linkedin-dm-task1');
+    expect(browserService.calls.slice(-3)).toEqual([
+      {
+        method: 'listTabs',
+        sessionId: 'linkedin-dm-task1',
+        payload: {
+          currentWindow: false,
+        },
+      },
+      {
+        method: 'openTab',
+        sessionId: 'linkedin-dm-task1',
+        payload: {
+          url: 'https://www.linkedin.com/messaging/',
+          active: false,
+        },
+      },
+      {
+        method: 'listTabs',
+        sessionId: 'linkedin-dm-task1',
+        payload: {
+          currentWindow: false,
         },
       },
     ]);
@@ -530,6 +683,30 @@ describe('native CLI tabs commands', () => {
     expect(payload.data.createdNewTab).toBe(false);
     expect(payload.data.reusedExistingTab).toBe(true);
     expect(payload.data.tab.id).toBe(102);
+  });
+
+  it('reuses an existing exact-url tab before opening a duplicate', async () => {
+    const outcome = await runCliCommand(
+      ['tabs', 'open', 'https://docs.example.com', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.createdNewTab).toBe(false);
+    expect(payload.data.reusedExistingTab).toBe(true);
+    expect(payload.data.tab.id).toBe(102);
+    expect(browserService.calls).toEqual([
+      {
+        method: 'listTabs',
+        sessionId: 's1',
+        payload: {
+          currentWindow: false,
+        },
+      },
+    ]);
   });
 
   it('activates, closes others, and closes explicit tab ids', async () => {

@@ -2,7 +2,13 @@ import { SessionStore } from '../session-store.js';
 
 import { CONSOLE_EVENT_PREFIXES, toConsoleEntries } from '../console-utils.js';
 
-import { parseOptionalTabFlag, parsePositiveInteger, resolveSession, resolveTabId } from './support.js';
+import {
+  createImplicitTabResolutionHelpLines,
+  parseOptionalTabFlag,
+  parsePositiveInteger,
+  resolveSession,
+  resolveTabId,
+} from './support.js';
 
 import type { BrowserService, CliCommandResult } from '../types.js';
 
@@ -287,6 +293,6 @@ function createConsoleHelpLines(): string[] {
     '  chrome-controller console clear [--tab <id>]',
     '',
     'Notes:',
-    '  When --tab is omitted, the current active tab in the current window is used.',
+    ...createImplicitTabResolutionHelpLines(),
   ];
 }

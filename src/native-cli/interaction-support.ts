@@ -231,7 +231,7 @@ export async function retryDetachedOperation<T>(
 
   if (isDetachedEvaluationError(lastError)) {
     throw new Error(
-      `${operationName} failed because the page changed while the command was running. Wait for the page to settle, then try again.`
+      `${operationName} could not finish because the page was navigating or re-rendering. Wait for the page to settle, then try again.`
     );
   }
 
@@ -244,7 +244,60 @@ export function isDetachedEvaluationError(error: unknown): boolean {
   }
 
   const message = error.message.toLowerCase();
-  return message.includes('detached') || message.includes('debugger is not attached');
+  return (
+    message.includes('detached') ||
+    message.includes('debugger is not attached') ||
+    message.includes('cannot find default execution context') ||
+    message.includes('execution context was destroyed') ||
+    message.includes('cannot find context with specified id') ||
+    message.includes('inspected target navigated or closed')
+  );
+}
+
+export async function retryStaleDomOperation<T>(
+  operationName: string,
+  fn: () => Promise<T>,
+  options: {
+    attempts?: number;
+    delayMs?: number;
+  } = {}
+): Promise<T> {
+  const attempts = Math.max(1, options.attempts ?? 3);
+  const delayMs = Math.max(0, options.delayMs ?? 120);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableStaleDomError(error) || attempt === attempts - 1) {
+        break;
+      }
+
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+export function isRetryableStaleDomError(error: unknown): boolean {
+  if (isDetachedEvaluationError(error)) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.startsWith('Could not find element for selectors:') ||
+    error.message.startsWith('Could not uniquely resolve element for selectors:') ||
+    error.message.startsWith('Could not uniquely resolve @e')
+  );
 }
 
 function domOperationRuntime(request: {

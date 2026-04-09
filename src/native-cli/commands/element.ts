@@ -2,6 +2,7 @@ import { SessionStore } from '../session-store.js';
 
 import {
   resolveElementTarget,
+  retryStaleDomOperation,
   retryDetachedOperation,
   runDomOperation,
 } from '../interaction-support.js';
@@ -65,7 +66,8 @@ async function runElementActionCommand(
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `element ${action}`);
-  const [target, ...rest] = args;
+  const parsedRetry = parseRetryStaleFlag(args);
+  const [target, ...rest] = parsedRetry.args;
   if (!target) {
     throw new Error(`Usage: chrome-controller element ${action} <selector|@ref> [--tab <id>]`);
   }
@@ -76,13 +78,25 @@ async function runElementActionCommand(
   const session = await resolveSession(options.sessionStore, options.explicitSessionId);
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
-  const result = await runDomOperation(
-    options.browserService,
-    session,
-    tabId,
-    resolvedTarget,
-    action
-  );
+  const result = parsedRetry.retryStale
+    ? await retryStaleDomOperation(
+        `element ${action} ${resolvedTarget.ref ?? resolvedTarget.raw}`,
+        async () =>
+          await runDomOperation(
+            options.browserService,
+            session,
+            tabId,
+            resolvedTarget,
+            action
+          )
+      )
+    : await runDomOperation(
+        options.browserService,
+        session,
+        tabId,
+        resolvedTarget,
+        action
+      );
 
   return {
     session,
@@ -102,7 +116,8 @@ async function runElementValueCommand(
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `element ${action}`);
-  const [target, ...rest] = args;
+  const parsedRetry = parseRetryStaleFlag(args);
+  const [target, ...rest] = parsedRetry.args;
   if (!target || rest.length === 0) {
     throw new Error(
       `Usage: chrome-controller element ${action} <selector|@ref> <value> [--tab <id>]`
@@ -128,20 +143,39 @@ async function runElementValueCommand(
   const session = await resolveSession(options.sessionStore, options.explicitSessionId);
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
-  const result = await runDomOperation(
-    options.browserService,
-    session,
-    tabId,
-    resolvedTarget,
-    action,
-    {
-      value,
-      ...(delayMs !== undefined ? { delayMs } : {}),
-    },
-    {
-      ...(action === 'type' ? { awaitPromise: true } : {}),
-    }
-  );
+  const result = parsedRetry.retryStale
+    ? await retryStaleDomOperation(
+        `element ${action} ${resolvedTarget.ref ?? resolvedTarget.raw}`,
+        async () =>
+          await runDomOperation(
+            options.browserService,
+            session,
+            tabId,
+            resolvedTarget,
+            action,
+            {
+              value,
+              ...(delayMs !== undefined ? { delayMs } : {}),
+            },
+            {
+              ...(action === 'type' ? { awaitPromise: true } : {}),
+            }
+          )
+      )
+    : await runDomOperation(
+        options.browserService,
+        session,
+        tabId,
+        resolvedTarget,
+        action,
+        {
+          value,
+          ...(delayMs !== undefined ? { delayMs } : {}),
+        },
+        {
+          ...(action === 'type' ? { awaitPromise: true } : {}),
+        }
+      );
 
   return {
     session,
@@ -162,7 +196,8 @@ async function runElementToggleCommand(
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `element ${action}`);
-  const [target, ...rest] = args;
+  const parsedRetry = parseRetryStaleFlag(args);
+  const [target, ...rest] = parsedRetry.args;
   if (!target) {
     throw new Error(`Usage: chrome-controller element ${action} <selector|@ref> [--tab <id>]`);
   }
@@ -173,13 +208,25 @@ async function runElementToggleCommand(
   const session = await resolveSession(options.sessionStore, options.explicitSessionId);
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
-  const result = await runDomOperation(
-    options.browserService,
-    session,
-    tabId,
-    resolvedTarget,
-    action
-  );
+  const result = parsedRetry.retryStale
+    ? await retryStaleDomOperation(
+        `element ${action} ${resolvedTarget.ref ?? resolvedTarget.raw}`,
+        async () =>
+          await runDomOperation(
+            options.browserService,
+            session,
+            tabId,
+            resolvedTarget,
+            action
+          )
+      )
+    : await runDomOperation(
+        options.browserService,
+        session,
+        tabId,
+        resolvedTarget,
+        action
+      );
 
   return {
     session,
@@ -200,7 +247,8 @@ async function runElementReadCommand(
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `element ${action}`);
-  const [target, ...rest] = args;
+  const parsedRetry = parseRetryStaleFlag(args);
+  const [target, ...rest] = parsedRetry.args;
   if (!target) {
     throw new Error(`Usage: chrome-controller element ${action} <selector|@ref> [--tab <id>]`);
   }
@@ -211,13 +259,25 @@ async function runElementReadCommand(
   const session = await resolveSession(options.sessionStore, options.explicitSessionId);
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
-  const result = await runDomOperation(
-    options.browserService,
-    session,
-    tabId,
-    resolvedTarget,
-    action
-  );
+  const result = parsedRetry.retryStale
+    ? await retryStaleDomOperation(
+        `element ${action} ${resolvedTarget.ref ?? resolvedTarget.raw}`,
+        async () =>
+          await runDomOperation(
+            options.browserService,
+            session,
+            tabId,
+            resolvedTarget,
+            action
+          )
+      )
+    : await runDomOperation(
+        options.browserService,
+        session,
+        tabId,
+        resolvedTarget,
+        action
+      );
   const value =
     action === 'text'
       ? result.text ?? null
@@ -245,7 +305,8 @@ async function runElementAttrCommand(
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'element attr');
-  const [target, attribute, ...rest] = args;
+  const parsedRetry = parseRetryStaleFlag(args);
+  const [target, attribute, ...rest] = parsedRetry.args;
   if (!target || !attribute) {
     throw new Error(
       'Usage: chrome-controller element attr <selector|@ref> <name> [--tab <id>]'
@@ -288,6 +349,28 @@ async function runElementAttrCommand(
       result,
     },
     lines: [result.value === null ? 'null' : String(result.value)],
+  };
+}
+
+function parseRetryStaleFlag(args: string[]): {
+  args: string[];
+  retryStale: boolean;
+} {
+  const rest: string[] = [];
+  let retryStale = false;
+
+  for (const arg of args) {
+    if (arg === '--retry-stale') {
+      retryStale = true;
+      continue;
+    }
+
+    rest.push(arg);
+  }
+
+  return {
+    args: rest,
+    retryStale,
   };
 }
 
@@ -401,5 +484,6 @@ function createElementHelpLines(): string[] {
     '',
     'Notes:',
     '  Targets can be CSS selectors or snapshot refs like @e1.',
+    '  Add --retry-stale to retry transient detached or re-render races on dynamic pages.',
   ];
 }

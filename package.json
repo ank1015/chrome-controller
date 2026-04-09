@@ -23,10 +23,12 @@
   ],
   "scripts": {
     "build": "node ./scripts/clean.mjs && pnpm build:native && pnpm build:chrome",
-    "build:native": "tsc && node ./scripts/copy-build-asset.mjs native",
+    "build:native": "tsc && node ./scripts/ensure-native-cli-bin.mjs && node ./scripts/copy-build-asset.mjs native",
     "build:chrome": "tsx esbuild.config.ts && node ./scripts/generate-chrome-icons.mjs && node ./scripts/copy-build-asset.mjs chrome",
     "package:chrome-webstore": "pnpm build:chrome && node ./scripts/package-chrome-extension.mjs",
     "test": "vitest run",
+    "test:find-live": "pnpm exec tsc && CHROME_CONTROLLER_RUN_LIVE_FIND_TESTS=1 vitest run tests/live/native-cli/find-live.test.ts",
+    "test:sdk-live": "CHROME_CONTROLLER_RUN_LIVE_SDK_TESTS=1 vitest run tests/live/sdk/controller-live.test.ts",
     "test:chrome-bridge": "pnpm build && node ./scripts/check-chrome-bridge.mjs",
     "dev": "node ../../scripts/run-parallel.mjs \"pnpm dev:native\" \"pnpm dev:chrome\"",
     "dev:native": "tsc --watch",
@@ -71,6 +73,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@ank1015/llm-sdk": "^0.0.4",
     "turndown": "^7.2.4"
   }
 }

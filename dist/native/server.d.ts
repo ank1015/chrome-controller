@@ -1,4 +1,4 @@
-import type { ChromeClient } from '../sdk/core/client.js';
+import type { ChromeClient } from './client.js';
 export interface ChromeServerOptions {
     port?: number;
     host?: string;

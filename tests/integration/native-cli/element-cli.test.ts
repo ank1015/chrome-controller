@@ -337,4 +337,30 @@ describe('native CLI element commands', () => {
     );
     expect(outcome.stderr).toContain('page snapshot');
   });
+
+  it('retries a transient detached click when --retry-stale is enabled', async () => {
+    browserService.clickDetachedFailuresRemaining = 1;
+
+    const outcome = await runCliCommand(
+      ['element', 'click', '@e2', '--retry-stale', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tabId: 101,
+      target: '@e2',
+      matchedSelector: 'button[type="submit"]',
+      result: {
+        ok: true,
+        matchedSelector: 'button[type="submit"]',
+      },
+    });
+    expect(
+      browserService.calls.filter((call) => call.method === 'evaluateTab')
+    ).toHaveLength(2);
+  });
 });

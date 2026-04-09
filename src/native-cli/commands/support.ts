@@ -37,6 +37,26 @@ export async function resolveTab(
     };
   }
 
+  if (typeof session.targetTabId === 'number') {
+    try {
+      const tab = await browserService.getTab(session, session.targetTabId);
+      if (typeof tab.id !== 'number') {
+        throw new Error(`Could not resolve tab ${session.targetTabId}`);
+      }
+
+      return {
+        id: tab.id,
+        url: tab.url,
+        title: tab.title,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Pinned target tab ${session.targetTabId} for session ${session.id} could not be resolved (${message}). Run \`chrome-controller tabs target clear --session ${session.id}\` or \`chrome-controller tabs target set <tabId> --session ${session.id}\`.`
+      );
+    }
+  }
+
   const tabs = await browserService.listTabs(session, {
     currentWindow: true,
   });
@@ -51,6 +71,20 @@ export async function resolveTab(
     url: activeTab.url,
     title: activeTab.title,
   };
+}
+
+export function createImplicitTabResolutionHelpLines(): string[] {
+  return [
+    '  When --tab is omitted, the pinned session target tab is used first.',
+    '  If no pinned target tab exists, the active tab in the current window is used.',
+  ];
+}
+
+export function createImplicitTabUrlScopeHelpLines(): string[] {
+  return [
+    '  When no scope is provided, commands use the pinned session target tab URL first.',
+    '  If no pinned target tab exists, they fall back to the active tab URL in the current window.',
+  ];
 }
 
 export function parseOptionalTabFlag(

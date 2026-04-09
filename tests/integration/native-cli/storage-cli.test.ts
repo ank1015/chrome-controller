@@ -39,6 +39,7 @@ function createTab(overrides: Partial<CliTabInfo> = {}): CliTabInfo {
 }
 
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
+  reloadFailureMessage: string | null = null;
   private readonly tabs = [
     createTab({ id: 101, active: true, title: 'Dashboard' }),
   ];
@@ -250,6 +251,10 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       sessionId: session.id,
       payload: tabId,
     });
+
+    if (this.reloadFailureMessage) {
+      throw new Error(this.reloadFailureMessage);
+    }
 
     return { ...this.tabs[0], id: tabId };
   }
@@ -473,6 +478,106 @@ describe('native CLI storage commands', () => {
       sessionCount: 1,
       cookieCount: 1,
       reloaded: true,
+    });
+    expect(browserService.calls.slice(-2)).toEqual([
+      {
+        method: 'applyStorageState',
+        sessionId: 's1',
+        payload: {
+          tabId: 101,
+          state: {
+            version: 1,
+            savedAt: '2026-04-06T00:00:00.000Z',
+            url: 'https://example.com/dashboard',
+            origin: 'https://example.com',
+            title: 'Dashboard',
+            localStorage: {
+              token: 'fresh',
+            },
+            sessionStorage: {
+              draft: 'done',
+            },
+            cookies: [
+              {
+                name: 'sid',
+                value: 'cookie-2',
+                domain: '.example.com',
+                path: '/',
+                secure: true,
+                httpOnly: true,
+                sameSite: 'lax',
+                expirationDate: 2000,
+                storeId: '0',
+              },
+            ],
+          },
+        },
+      },
+      {
+        method: 'reloadTab',
+        sessionId: 's1',
+        payload: 101,
+      },
+    ]);
+  });
+
+  it('returns partial JSON data when state load succeeds but reload fails', async () => {
+    const statePath = join(tempHome, 'incoming-state.json');
+    await writeStateFile(statePath, {
+      version: 1,
+      savedAt: '2026-04-06T00:00:00.000Z',
+      url: 'https://example.com/dashboard',
+      origin: 'https://example.com',
+      title: 'Dashboard',
+      localStorage: {
+        token: 'fresh',
+      },
+      sessionStorage: {
+        draft: 'done',
+      },
+      cookies: [
+        {
+          name: 'sid',
+          value: 'cookie-2',
+          domain: '.example.com',
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'lax',
+          expirationDate: 2000,
+          storeId: '0',
+        },
+      ],
+    });
+    browserService.reloadFailureMessage = 'Reload failed';
+
+    const outcome = await runCliCommand(
+      ['storage', 'state-load', statePath, '--reload', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.stderr).toBe('');
+    expect(payload).toEqual({
+      success: false,
+      error: 'Reload failed',
+      sessionId: 's1',
+      partial: true,
+      data: {
+        tabId: 101,
+        path: statePath,
+        origin: 'https://example.com',
+        url: 'https://example.com/dashboard',
+        localCount: 1,
+        sessionCount: 1,
+        cookieCount: 1,
+        reloaded: false,
+        reloadRequested: true,
+        reloadError: 'Reload failed',
+      },
     });
     expect(browserService.calls.slice(-2)).toEqual([
       {

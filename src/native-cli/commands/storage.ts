@@ -1,9 +1,15 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { CliPartialResultError } from '../command-error.js';
 import { SessionStore } from '../session-store.js';
 
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import {
+  createImplicitTabResolutionHelpLines,
+  parseOptionalTabFlag,
+  resolveSession,
+  resolveTabId,
+} from './support.js';
 
 import type {
   BrowserService,
@@ -229,7 +235,26 @@ async function runStateLoadCommand(
   const outcome = await options.browserService.applyStorageState(session, tabId, state);
 
   if (parsed.reload) {
-    await options.browserService.reloadTab(session, tabId);
+    try {
+      await options.browserService.reloadTab(session, tabId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliPartialResultError(message, {
+        session,
+        data: {
+          tabId,
+          path: absolutePath,
+          ...outcome,
+          reloaded: false,
+          reloadRequested: true,
+          reloadError: message,
+        },
+        lines: [
+          `Loaded storage state into tab ${tabId} from ${absolutePath}`,
+          `Reload did not complete for tab ${tabId}`,
+        ],
+      });
+    }
   }
 
   return {
@@ -390,6 +415,6 @@ function createStorageHelpLines(): string[] {
     '  chrome-controller storage state-load <path> [--reload] [--tab <id>]',
     '',
     'Notes:',
-    '  When --tab is omitted, the current active tab in the current window is used.',
+    ...createImplicitTabResolutionHelpLines(),
   ];
 }

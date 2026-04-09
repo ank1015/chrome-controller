@@ -1,6 +1,12 @@
 import { runInNewContext } from 'node:vm';
 
-import { buildDomOperationCode } from '../../../src/native-cli/interaction-support.js';
+import {
+  buildDomOperationCode,
+  isDetachedEvaluationError,
+  isRetryableStaleDomError,
+  retryDetachedOperation,
+  retryStaleDomOperation,
+} from '../../../src/native-cli/interaction-support.js';
 
 class FakeElement {
   tagName: string;
@@ -222,5 +228,71 @@ describe('native CLI interaction support DOM runtime', () => {
     expect(wrongB.clicks).toBe(0);
     expect(wrongC.clicks).toBe(0);
     expect(wrongD.clicks).toBe(0);
+  });
+});
+
+describe('native CLI stale DOM retries', () => {
+  it('recognizes transient detached and stale selector errors as retryable', () => {
+    expect(isRetryableStaleDomError(new Error('Detached while handling command.'))).toBe(true);
+    expect(isRetryableStaleDomError(new Error('Cannot find default execution context'))).toBe(
+      true
+    );
+    expect(
+      isRetryableStaleDomError(
+        new Error('Could not find element for selectors: button.submit')
+      )
+    ).toBe(true);
+    expect(
+      isRetryableStaleDomError(
+        new Error('Could not uniquely resolve @e2. The page may have changed.')
+      )
+    ).toBe(true);
+    expect(isRetryableStaleDomError(new Error('Target element is not a select element'))).toBe(
+      false
+    );
+  });
+
+  it('retries a transient stale error and returns the later success', async () => {
+    let attempts = 0;
+
+    const result = await retryStaleDomOperation('element click @e2', async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('Could not find element for selectors: button.submit');
+      }
+
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toBe(2);
+  });
+
+  it('recognizes transient execution-context errors as detached evaluation errors', () => {
+    expect(isDetachedEvaluationError(new Error('Cannot find default execution context'))).toBe(
+      true
+    );
+    expect(
+      isDetachedEvaluationError(new Error('Execution context was destroyed, most likely because of a navigation.'))
+    ).toBe(true);
+    expect(isDetachedEvaluationError(new Error('Target element is not a select element'))).toBe(
+      false
+    );
+  });
+
+  it('retries a transient execution-context error and returns the later success', async () => {
+    let attempts = 0;
+
+    const result = await retryDetachedOperation('page snapshot', async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('Cannot find default execution context');
+      }
+
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toBe(2);
   });
 });

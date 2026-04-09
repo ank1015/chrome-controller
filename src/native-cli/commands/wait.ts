@@ -1,6 +1,16 @@
 import { SessionStore } from '../session-store.js';
 
-import { resolveElementTarget, runDomOperation, sleep } from '../interaction-support.js';
+import {
+  resolveElementTarget,
+  retryDetachedOperation,
+  runDomOperation,
+  sleep,
+} from '../interaction-support.js';
+import {
+  buildPageStabilityEvaluationCode,
+  parsePageStabilityInfo,
+  summarizeNetworkEventsForStability,
+} from '../wait-support.js';
 import { runDownloadsCommand } from './downloads.js';
 import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
 
@@ -16,6 +26,18 @@ interface WaitCommandOptions {
 
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_POLL_MS = 250;
+const DEFAULT_STABLE_QUIET_MS = 500;
+
+export interface TabStabilityResult {
+  tabId: number;
+  quietMs: number;
+  waitedMs: number;
+  readyState: string;
+  url: string | null;
+  domQuietForMs: number;
+  networkQuietForMs: number;
+  inflightRequests: number;
+}
 
 export async function runWaitCommand(
   options: WaitCommandOptions
@@ -31,6 +53,8 @@ export async function runWaitCommand(
       return await runWaitUrlCommand(rest, options);
     case 'load':
       return await runWaitLoadCommand(rest, options);
+    case 'stable':
+      return await runWaitStableCommand(rest, options);
     case 'idle':
       return await runWaitIdleCommand(rest, options);
     case 'fn':
@@ -67,12 +91,16 @@ async function runWaitElementCommand(
     parsed.timeoutMs,
     parsed.pollMs,
     async () => {
-      const state = await runDomOperation(
-        options.browserService,
-        session,
-        tabId,
-        target,
-        'exists'
+      const state = await retryDetachedOperation(
+        `wait element ${target.description}`,
+        async () =>
+          await runDomOperation(
+            options.browserService,
+            session,
+            tabId,
+            target,
+            'exists'
+          )
       );
 
       switch (parsed.state) {
@@ -118,26 +146,34 @@ async function runWaitTextCommand(
     parsed.pollMs,
     async () => {
       if (target) {
-        const state = await runDomOperation(
-          options.browserService,
-          session,
-          tabId,
-          target,
-          'text-contains',
-          { text: parsed.text }
+        const state = await retryDetachedOperation(
+          `wait text ${JSON.stringify(parsed.text)}`,
+          async () =>
+            await runDomOperation(
+              options.browserService,
+              session,
+              tabId,
+              target,
+              'text-contains',
+              { text: parsed.text }
+            )
         );
         return state.value === true;
       }
 
-      const state = (await options.browserService.evaluateTab(
-        session,
-        tabId,
-        `(() => {
-          const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
-          const text = ${JSON.stringify(parsed.text)};
-          const haystack = normalize(document.body?.innerText || document.body?.textContent || '');
-          return { value: haystack.includes(text) };
-        })()`
+      const state = (await retryDetachedOperation(
+        `wait text ${JSON.stringify(parsed.text)}`,
+        async () =>
+          await options.browserService.evaluateTab(
+            session,
+            tabId,
+            `(() => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const text = ${JSON.stringify(parsed.text)};
+              const haystack = normalize(document.body?.innerText || document.body?.textContent || '');
+              return { value: haystack.includes(text) };
+            })()`
+          )
       )) as { value?: boolean };
       return state.value === true;
     },
@@ -213,6 +249,131 @@ async function runWaitLoadCommand(
   };
 }
 
+async function runWaitStableCommand(
+  rawArgs: string[],
+  options: WaitCommandOptions
+): Promise<CliCommandResult> {
+  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait stable');
+  const parsed = parseWaitStableArgs(args);
+  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const stability = await waitForTabStable(options.browserService, session, tabId, {
+    timeoutMs: parsed.timeoutMs,
+    pollMs: parsed.pollMs,
+    quietMs: parsed.quietMs,
+  });
+
+  return {
+    session,
+    data: stability,
+    lines: [`Tab ${tabId} became stable`],
+  };
+}
+
+export async function waitForTabStable(
+  browserService: BrowserService,
+  session: Awaited<ReturnType<typeof resolveSession>>,
+  tabId: number,
+  options: {
+    timeoutMs?: number;
+    pollMs?: number;
+    quietMs?: number;
+  } = {}
+): Promise<TabStabilityResult> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? DEFAULT_WAIT_POLL_MS;
+  const quietMs = options.quietMs ?? DEFAULT_STABLE_QUIET_MS;
+  const attachResult = await browserService.attachDebugger(session, tabId);
+
+  let previousNetworkEventCount = 0;
+  let lastNetworkActivityAt: number | null = null;
+  let lastObservedState: {
+    readyState: string;
+    url: string | null;
+    domQuietForMs: number;
+    networkQuietForMs: number;
+    inflightRequests: number;
+  } | null = null;
+  const startedAt = Date.now();
+
+  try {
+    await browserService.sendDebuggerCommand(session, tabId, 'Network.enable');
+    await browserService.getDebuggerEvents(session, tabId, {
+      filter: 'Network.',
+      clear: true,
+    });
+
+    await waitUntil(
+      timeoutMs,
+      pollMs,
+      async () => {
+        const tab = await browserService.getTab(session, tabId);
+        const pageState = parsePageStabilityInfo(
+          await retryDetachedOperation(
+            `wait stable tab ${tabId}`,
+            async () =>
+              await browserService.evaluateTab(
+                session,
+                tabId,
+                buildPageStabilityEvaluationCode()
+              ),
+            {
+              attempts: 3,
+              delayMs: 100,
+            }
+          )
+        );
+        const networkEvents = await readStableNetworkEvents(
+          browserService,
+          session,
+          tabId
+        );
+        const networkState = summarizeNetworkEventsForStability(networkEvents);
+        const nowMs = Date.now();
+
+        if (networkState.eventCount > previousNetworkEventCount) {
+          lastNetworkActivityAt = nowMs;
+        }
+        previousNetworkEventCount = networkState.eventCount;
+
+        const networkQuietForMs =
+          lastNetworkActivityAt === null ? pageState.quietForMs : nowMs - lastNetworkActivityAt;
+
+        lastObservedState = {
+          readyState: pageState.readyState,
+          url: pageState.url,
+          domQuietForMs: pageState.quietForMs,
+          networkQuietForMs,
+          inflightRequests: networkState.inflightRequests,
+        };
+
+        return (
+          tab.status === 'complete' &&
+          pageState.readyState === 'complete' &&
+          pageState.quietForMs >= quietMs &&
+          networkQuietForMs >= quietMs
+        );
+      },
+      `Timed out waiting for tab ${tabId} to become stable`
+    );
+  } finally {
+    if (!attachResult.alreadyAttached) {
+      await browserService.detachDebugger(session, tabId);
+    }
+  }
+
+  return {
+    tabId,
+    quietMs,
+    waitedMs: Date.now() - startedAt,
+    readyState: lastObservedState?.readyState ?? 'unknown',
+    url: lastObservedState?.url ?? null,
+    domQuietForMs: lastObservedState?.domQuietForMs ?? 0,
+    networkQuietForMs: lastObservedState?.networkQuietForMs ?? 0,
+    inflightRequests: lastObservedState?.inflightRequests ?? 0,
+  };
+}
+
 async function runWaitIdleCommand(
   rawArgs: string[],
   options: WaitCommandOptions
@@ -258,15 +419,19 @@ async function runWaitFnCommand(
     parsed.timeoutMs,
     parsed.pollMs,
     async () => {
-      const result = (await options.browserService.evaluateTab(
-        session,
-        tabId,
-        parsed.awaitPromise
-          ? `(async () => ({ value: await (${parsed.expression}) }))()`
-          : `(() => ({ value: (${parsed.expression}) }))()`,
-        {
-          ...(parsed.awaitPromise ? { awaitPromise: true } : {}),
-        }
+      const result = (await retryDetachedOperation(
+        'wait fn condition',
+        async () =>
+          await options.browserService.evaluateTab(
+            session,
+            tabId,
+            parsed.awaitPromise
+              ? `(async () => ({ value: await (${parsed.expression}) }))()`
+              : `(() => ({ value: (${parsed.expression}) }))()`,
+            {
+              ...(parsed.awaitPromise ? { awaitPromise: true } : {}),
+            }
+          )
       )) as { value?: unknown };
       return Boolean(result.value);
     },
@@ -300,6 +465,30 @@ async function waitUntil(
   }
 
   throw new Error(timeoutMessage);
+}
+
+async function readStableNetworkEvents(
+  browserService: BrowserService,
+  session: Awaited<ReturnType<typeof resolveSession>>,
+  tabId: number
+) {
+  try {
+    return await browserService.getDebuggerEvents(session, tabId, {
+      filter: 'Network.',
+    });
+  } catch (error) {
+    if (!isMissingDebuggerSession(error)) {
+      throw error;
+    }
+
+    await browserService.attachDebugger(session, tabId);
+    await browserService.sendDebuggerCommand(session, tabId, 'Network.enable');
+    await browserService.getDebuggerEvents(session, tabId, {
+      filter: 'Network.',
+      clear: true,
+    });
+    return [];
+  }
 }
 
 function parseWaitElementArgs(args: string[]): {
@@ -445,6 +634,40 @@ function parseWaitFnArgs(args: string[]): {
   };
 }
 
+function parseWaitStableArgs(args: string[]): {
+  timeoutMs: number;
+  pollMs: number;
+  quietMs: number;
+} {
+  const parsed = parseCommonWaitArgs(args, 'wait stable');
+  let quietMs = DEFAULT_STABLE_QUIET_MS;
+
+  for (let index = 0; index < parsed.rest.length; index += 1) {
+    const arg = parsed.rest[index];
+    if (arg === '--quiet-ms') {
+      const value = parsed.rest[index + 1];
+      if (!value) {
+        throw new Error('Missing value for --quiet-ms');
+      }
+      quietMs = parsePositiveInteger(value, '--quiet-ms');
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--quiet-ms=')) {
+      quietMs = parsePositiveInteger(arg.slice('--quiet-ms='.length), '--quiet-ms');
+      continue;
+    }
+
+    throw new Error(`Unknown option for wait stable: ${arg}`);
+  }
+
+  return {
+    timeoutMs: parsed.timeoutMs,
+    pollMs: parsed.pollMs,
+    quietMs,
+  };
+}
+
 function parseCommonWaitArgs(
   args: string[],
   commandName: string
@@ -513,6 +736,10 @@ function parsePositiveInteger(value: string, name: string): number {
   return parsed;
 }
 
+function isMissingDebuggerSession(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('No debugger session');
+}
+
 function createWaitHelpLines(): string[] {
   return [
     'Wait commands',
@@ -522,8 +749,12 @@ function createWaitHelpLines(): string[] {
     '  chrome-controller wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
     '  chrome-controller wait url <text> [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
     '  chrome-controller wait load [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
+    '  chrome-controller wait stable [--quiet-ms <n>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
     '  chrome-controller wait idle <ms> [--tab <id>]',
     '  chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
     '  chrome-controller wait download [downloads wait options]',
+    '',
+    'Notes:',
+    '  wait stable tolerates persistent background requests once the DOM and network have been quiet for the requested window.',
   ];
 }

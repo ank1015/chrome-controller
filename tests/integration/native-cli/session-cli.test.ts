@@ -96,6 +96,41 @@ describe('native CLI session commands', () => {
     );
   });
 
+  it('creates a named session when session create uses the global --session flag', async () => {
+    const create = await runCliCommand(
+      ['session', 'create', '--session', 'linkedin-dm-task1', '--json'],
+      tempHome,
+      now
+    );
+    const list = await runCliCommand(['session', 'list', '--json'], tempHome, now);
+
+    const createPayload = JSON.parse(create.stdout);
+    const listPayload = JSON.parse(list.stdout);
+
+    expect(create.exitCode).toBe(0);
+    expect(createPayload.sessionId).toBe('linkedin-dm-task1');
+    expect(createPayload.data.session.id).toBe('linkedin-dm-task1');
+    expect(listPayload.data.currentSessionId).toBe('linkedin-dm-task1');
+    expect(listPayload.data.sessions).toEqual([
+      expect.objectContaining({ id: 'linkedin-dm-task1', current: true }),
+    ]);
+  });
+
+  it('rejects conflicting create ids when both --id and --session are provided', async () => {
+    const outcome = await runCliCommand(
+      ['session', 'create', '--id', 'alpha', '--session', 'beta', '--json'],
+      tempHome,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(1);
+    expect(payload).toEqual({
+      success: false,
+      error: 'Conflicting session ids provided: --id alpha and --session beta',
+    });
+  });
+
   it('returns JSON errors for invalid commands in json mode', async () => {
     const outcome = await runCliCommand(['session', 'use', 'missing', '--json'], tempHome, now);
     const payload = JSON.parse(outcome.stdout);

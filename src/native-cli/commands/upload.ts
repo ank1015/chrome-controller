@@ -1,6 +1,11 @@
 import { SessionStore } from '../session-store.js';
 
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import {
+  createImplicitTabResolutionHelpLines,
+  parseOptionalTabFlag,
+  resolveSession,
+  resolveTabId,
+} from './support.js';
 
 import type { BrowserService, CliCommandResult } from '../types.js';
 
@@ -65,6 +70,6 @@ function createUploadHelpLines(): string[] {
     '  chrome-controller upload files <selector> <path...> [--tab <id>]',
     '',
     'Notes:',
-    '  When --tab is omitted, the current active tab in the current window is used.',
+    ...createImplicitTabResolutionHelpLines(),
   ];
 }

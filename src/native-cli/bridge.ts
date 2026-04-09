@@ -8,6 +8,7 @@ import type { Socket } from 'node:net';
 
 export interface ManagedChromeBridgeClient {
   call<T = unknown>(method: string, ...args: unknown[]): Promise<T>;
+  subscribe<T = unknown>(event: string, callback: (data: T) => void): () => void;
 }
 
 export interface ManagedChromeBridge {
@@ -96,6 +97,11 @@ function tryConnect(
         client: {
           call: async <T = unknown>(method: string, ...args: unknown[]): Promise<T> => {
             return (await client.call(method, ...args)) as T;
+          },
+          subscribe: <T = unknown>(event: string, callback: (data: T) => void): (() => void) => {
+            return client.subscribe(event, (data: unknown) => {
+              callback(data as T);
+            });
           },
         },
         close: async (): Promise<void> => {

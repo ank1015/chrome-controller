@@ -8,6 +8,12 @@ export {
 } from './session-store.js';
 
 export type {
+  ConnectChromeBridgeOptions,
+  ManagedChromeBridge,
+  ManagedChromeBridgeClient,
+} from './bridge.js';
+
+export type {
   BrowserService,
   CliCookieInfo,
   CliDebuggerEvent,

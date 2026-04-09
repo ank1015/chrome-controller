@@ -43,7 +43,7 @@ async function runCreateSessionCommand(
   args: string[],
   options: SessionCommandOptions
 ): Promise<CliCommandResult> {
-  const sessionId = readOptionalFlagValue(args, '--id');
+  const sessionId = resolveCreateSessionId(args, options.explicitSessionId);
   const session = await options.sessionStore.createSession(sessionId ?? undefined);
 
   return {
@@ -54,6 +54,26 @@ async function runCreateSessionCommand(
     },
     lines: [`Created session ${session.id}`],
   };
+}
+
+function resolveCreateSessionId(
+  args: string[],
+  explicitSessionId?: string
+): string | null {
+  const requestedId = readOptionalFlagValue(args, '--id');
+
+  if (
+    requestedId &&
+    explicitSessionId &&
+    normalizeSessionIdForComparison(requestedId) !==
+      normalizeSessionIdForComparison(explicitSessionId)
+  ) {
+    throw new Error(
+      `Conflicting session ids provided: --id ${requestedId} and --session ${explicitSessionId}`
+    );
+  }
+
+  return requestedId ?? explicitSessionId ?? null;
 }
 
 async function runCurrentSessionCommand(
@@ -192,6 +212,7 @@ function createSessionHelpLines(): string[] {
     '',
     'Usage:',
     '  chrome-controller session create [--id <id>]',
+    '  chrome-controller session create --session <id>',
     '  chrome-controller session current',
     '  chrome-controller session list',
     '  chrome-controller session use <id>',
@@ -200,26 +221,43 @@ function createSessionHelpLines(): string[] {
   ];
 }
 
+function normalizeSessionIdForComparison(value: string): string {
+  return value.trim();
+}
+
 function createSessionDetailLines(
   id: string,
-  session: { createdAt: string; updatedAt: string; lastUsedAt: string }
+  session: {
+    createdAt: string;
+    updatedAt: string;
+    lastUsedAt: string;
+    targetTabId: number | null;
+  }
 ): string[] {
   return [
     `Session ${id}`,
     `Created: ${session.createdAt}`,
     `Updated: ${session.updatedAt}`,
     `Last used: ${session.lastUsedAt}`,
+    `Target tab: ${session.targetTabId ?? 'none'}`,
   ];
 }
 
 function createSessionListLines(
-  sessions: Array<{ id: string; current: boolean; updatedAt: string }>
+  sessions: Array<{
+    id: string;
+    current: boolean;
+    updatedAt: string;
+    targetTabId: number | null;
+  }>
 ): string[] {
   const lines = ['Sessions'];
 
   for (const session of sessions) {
     lines.push(
-      `${session.current ? '*' : ' '} ${session.id}  updated=${session.updatedAt}`
+      `${session.current ? '*' : ' '} ${session.id}  updated=${session.updatedAt}  targetTab=${
+        session.targetTabId ?? 'none'
+      }`
     );
   }
 

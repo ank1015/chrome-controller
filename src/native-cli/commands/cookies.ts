@@ -3,7 +3,13 @@ import { dirname, resolve } from 'node:path';
 
 import { SessionStore } from '../session-store.js';
 
-import { parseOptionalTabFlag, parsePositiveInteger, resolveSession, resolveTab } from './support.js';
+import {
+  createImplicitTabUrlScopeHelpLines,
+  parseOptionalTabFlag,
+  parsePositiveInteger,
+  resolveSession,
+  resolveTab,
+} from './support.js';
 
 import type {
   BrowserService,
@@ -597,6 +603,6 @@ function createCookiesHelpLines(): string[] {
     '  chrome-controller cookies import <path> [--url <url>] [--tab <id>]',
     '',
     'Notes:',
-    '  When no scope is provided, commands default to the current active tab URL.',
+    ...createImplicitTabUrlScopeHelpLines(),
   ];
 }

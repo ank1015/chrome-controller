@@ -19,5 +19,7 @@ npx @ank1015/llm-extension tabs list --json
 ## Library
 
 ```ts
-import { ChromeBrowserService, runCli } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/llm-extension';
 ```
+
+See [`docs/06-sdk-automation-workflows.md`](./docs/06-sdk-automation-workflows.md) for SDK usage and automation patterns.

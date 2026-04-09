@@ -1,4 +1,5 @@
 import { SessionStore } from '../session-store.js';
+import { sleep } from '../interaction-support.js';
 
 import type {
   BrowserService,
@@ -17,6 +18,9 @@ interface TabsCommandOptions {
   browserService: BrowserService;
 }
 
+const OPEN_TAB_LIST_SETTLE_TIMEOUT_MS = 2_000;
+const OPEN_TAB_LIST_SETTLE_POLL_MS = 100;
+
 export async function runTabsCommand(options: TabsCommandOptions): Promise<CliCommandResult> {
   const [subcommand = 'list', ...rest] = options.args;
 
@@ -25,6 +29,8 @@ export async function runTabsCommand(options: TabsCommandOptions): Promise<CliCo
       return await runListTabsCommand(rest, options);
     case 'open':
       return await runOpenTabCommand(rest, options);
+    case 'target':
+      return await runTargetTabCommand(rest, options);
     case 'get':
       return await runGetTabCommand(rest, options);
     case 'activate':
@@ -86,17 +92,11 @@ async function runOpenTabCommand(
 ): Promise<CliCommandResult> {
   const openOptions = parseOpenTabOptions(args);
   const session = await resolveSession(options);
-  const existingTabs = await options.browserService.listTabs(session, {
-    currentWindow: false,
-  });
-  const existingTabIds = new Set(
-    existingTabs
-      .map((candidate) => candidate.id)
-      .filter((value): value is number => typeof value === 'number')
+  const { tab, createdNewTab, reusedExistingTab } = await openTabWithSettle(
+    options.browserService,
+    session,
+    openOptions
   );
-  const tab = await options.browserService.openTab(session, openOptions);
-  const reusedExistingTab = typeof tab.id === 'number' && existingTabIds.has(tab.id);
-  const createdNewTab = typeof tab.id === 'number' ? !reusedExistingTab : null;
 
   return {
     session,
@@ -107,6 +107,304 @@ async function runOpenTabCommand(
     },
     lines: [formatTabActionLine(reusedExistingTab ? 'Reused' : 'Opened', tab)],
   };
+}
+
+export async function openTabWithSettle(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  openOptions: CliOpenTabOptions
+): Promise<{
+  tab: CliTabInfo;
+  createdNewTab: boolean | null;
+  reusedExistingTab: boolean;
+}> {
+  const existingTabs = await browserService.listTabs(
+    session,
+    openOptions.windowId !== undefined
+      ? { windowId: openOptions.windowId }
+      : { currentWindow: false }
+  );
+  const reusableTab = findReusableTab(session, existingTabs, openOptions.url);
+
+  if (reusableTab) {
+    return {
+      tab: await applyReusableTabOptions(browserService, session, reusableTab, openOptions),
+      createdNewTab: false,
+      reusedExistingTab: true,
+    };
+  }
+
+  const existingTabIds = new Set(
+    existingTabs
+      .map((candidate) => candidate.id)
+      .filter((value): value is number => typeof value === 'number')
+  );
+  const openedTab = await browserService.openTab(session, openOptions);
+  const reusedExistingTab =
+    typeof openedTab.id === 'number' && existingTabIds.has(openedTab.id);
+  const createdNewTab = typeof openedTab.id === 'number' ? !reusedExistingTab : null;
+  const tab =
+    createdNewTab && typeof openedTab.id === 'number'
+      ? await waitForOpenedTabToAppearInLists(
+          browserService,
+          session,
+          openedTab
+        )
+      : openedTab;
+
+  return {
+    tab,
+    createdNewTab,
+    reusedExistingTab,
+  };
+}
+
+function findReusableTab(
+  session: CliSessionRecord,
+  tabs: CliTabInfo[],
+  requestedUrl: string
+): CliTabInfo | null {
+  const requestedUrlKey = normalizeTabUrlForReuse(requestedUrl);
+  const matchingTabs = tabs.filter((tab) => {
+    if (typeof tab.id !== 'number') {
+      return false;
+    }
+
+    return normalizeTabUrlForReuse(tab.url) === requestedUrlKey;
+  });
+
+  if (matchingTabs.length === 0) {
+    return null;
+  }
+
+  return matchingTabs.reduce((bestTab, candidate) => {
+    if (!bestTab) {
+      return candidate;
+    }
+
+    const candidateScore = scoreReusableTab(session, candidate);
+    const bestScore = scoreReusableTab(session, bestTab);
+    if (candidateScore !== bestScore) {
+      return candidateScore > bestScore ? candidate : bestTab;
+    }
+
+    const candidateIndex = candidate.index ?? Number.MAX_SAFE_INTEGER;
+    const bestIndex = bestTab.index ?? Number.MAX_SAFE_INTEGER;
+    return candidateIndex < bestIndex ? candidate : bestTab;
+  }, null as CliTabInfo | null);
+}
+
+function scoreReusableTab(session: CliSessionRecord, tab: CliTabInfo): number {
+  let score = 0;
+
+  if (tab.id === session.targetTabId) {
+    score += 100;
+  }
+
+  if (tab.status === 'complete') {
+    score += 10;
+  }
+
+  if (tab.active) {
+    score += 5;
+  }
+
+  if (tab.pinned) {
+    score += 1;
+  }
+
+  return score;
+}
+
+async function applyReusableTabOptions(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  tab: CliTabInfo,
+  openOptions: CliOpenTabOptions
+): Promise<CliTabInfo> {
+  if (typeof tab.id !== 'number') {
+    return tab;
+  }
+
+  let updatedTab = tab;
+
+  if (openOptions.pinned !== undefined && updatedTab.pinned !== openOptions.pinned) {
+    const [pinnedTab] = await browserService.pinTabs(session, [updatedTab.id], openOptions.pinned);
+    updatedTab = pinnedTab ?? await browserService.getTab(session, updatedTab.id);
+  }
+
+  if (openOptions.active === true && !updatedTab.active) {
+    updatedTab = await browserService.activateTab(session, updatedTab.id);
+  }
+
+  return updatedTab;
+}
+
+function normalizeTabUrlForReuse(url: string | null): string | null {
+  if (typeof url !== 'string') {
+    return null;
+  }
+
+  const trimmed = url.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+async function runTargetTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  const [subcommand = 'show', ...rest] = args;
+
+  switch (subcommand) {
+    case 'set':
+      return await runSetTargetTabCommand(rest, options);
+    case 'show':
+      return await runShowTargetTabCommand(rest, options);
+    case 'clear':
+      return await runClearTargetTabCommand(rest, options);
+    case 'help':
+    case '--help':
+    case '-h':
+      return {
+        lines: createTargetTabHelpLines(),
+      };
+    default:
+      throw new Error(`Unknown tabs target command: ${subcommand}`);
+  }
+}
+
+async function runSetTargetTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  const tabId = readRequiredTabId(args[0], 'target set');
+  if (args.length > 1) {
+    throw new Error(`Unknown option for tabs target set: ${args[1]}`);
+  }
+
+  const session = await resolveSession(options);
+  const tab = await options.browserService.getTab(session, tabId);
+  const updatedSession = await options.sessionStore.setTargetTab(session.id, tabId);
+
+  return {
+    session: updatedSession,
+    data: {
+      targetTabId: tabId,
+      tab,
+    },
+    lines: [`Pinned target tab ${tabId} for session ${updatedSession.id}`],
+  };
+}
+
+async function runShowTargetTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  if (args.length > 0) {
+    throw new Error(`Unknown option for tabs target show: ${args[0]}`);
+  }
+
+  const session = await resolveSession(options);
+  const targetTabId = session.targetTabId;
+  if (targetTabId === null) {
+    return {
+      session,
+      data: {
+        targetTabId: null,
+        tab: null,
+        stale: false,
+      },
+      lines: [`Session ${session.id} does not have a pinned target tab`],
+    };
+  }
+
+  try {
+    const tab = await options.browserService.getTab(session, targetTabId);
+    return {
+      session,
+      data: {
+        targetTabId,
+        tab,
+        stale: false,
+      },
+      lines: [`Pinned target ${formatTabSummary(tab)}`],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      session,
+      data: {
+        targetTabId,
+        tab: null,
+        stale: true,
+        error: message,
+      },
+      lines: [
+        `Pinned target tab ${targetTabId} for session ${session.id} could not be resolved`,
+      ],
+    };
+  }
+}
+
+async function runClearTargetTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  if (args.length > 0) {
+    throw new Error(`Unknown option for tabs target clear: ${args[0]}`);
+  }
+
+  const session = await resolveSession(options);
+  const clearedTargetTabId = session.targetTabId;
+  const updatedSession = await options.sessionStore.clearTargetTab(session.id);
+
+  return {
+    session: updatedSession,
+    data: {
+      clearedTargetTabId,
+      targetTabId: updatedSession.targetTabId,
+    },
+    lines: [
+      clearedTargetTabId === null
+        ? `Session ${updatedSession.id} does not have a pinned target tab`
+        : `Cleared pinned target tab ${clearedTargetTabId} for session ${updatedSession.id}`,
+    ],
+  };
+}
+
+async function waitForOpenedTabToAppearInLists(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  openedTab: CliTabInfo
+): Promise<CliTabInfo> {
+  const tabId = openedTab.id;
+  if (typeof tabId !== 'number') {
+    return openedTab;
+  }
+
+  const deadline = Date.now() + OPEN_TAB_LIST_SETTLE_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const tabs = await browserService.listTabs(session, {
+      currentWindow: false,
+    });
+    const listedTab = tabs.find((candidate) => candidate.id === tabId);
+    if (listedTab) {
+      return listedTab;
+    }
+
+    await sleep(OPEN_TAB_LIST_SETTLE_POLL_MS);
+  }
+
+  return openedTab;
 }
 
 async function runGetTabCommand(
@@ -557,6 +855,9 @@ function createTabsHelpLines(): string[] {
     'Usage:',
     '  chrome-controller tabs list [--window <id>] [--all]',
     '  chrome-controller tabs open <url> [--window <id>] [--active] [--pinned]',
+    '  chrome-controller tabs target set <tabId>',
+    '  chrome-controller tabs target show',
+    '  chrome-controller tabs target clear',
     '  chrome-controller tabs get <tabId>',
     '  chrome-controller tabs activate <tabId>',
     '  chrome-controller tabs close <tabId...>',
@@ -570,6 +871,17 @@ function createTabsHelpLines(): string[] {
     '  chrome-controller tabs unmute <tabId...>',
     '  chrome-controller tabs group <tabId...>',
     '  chrome-controller tabs ungroup <tabId...>',
+  ];
+}
+
+function createTargetTabHelpLines(): string[] {
+  return [
+    'Tabs target commands',
+    '',
+    'Usage:',
+    '  chrome-controller tabs target set <tabId>',
+    '  chrome-controller tabs target show',
+    '  chrome-controller tabs target clear',
   ];
 }
 

@@ -1,6 +1,13 @@
 import { SessionStore } from '../session-store.js';
 
-import { parseJsonObject, parseOptionalTabFlag, parsePositiveInteger, resolveSession, resolveTabId } from './support.js';
+import {
+  createImplicitTabResolutionHelpLines,
+  parseJsonObject,
+  parseOptionalTabFlag,
+  parsePositiveInteger,
+  resolveSession,
+  resolveTabId,
+} from './support.js';
 
 import type { BrowserService, CliCommandResult, CliDebuggerEvent } from '../types.js';
 
@@ -311,6 +318,6 @@ function createDebuggerHelpLines(): string[] {
     '  chrome-controller debugger clear-events [--filter <prefix>] [--tab <id>]',
     '',
     'Notes:',
-    '  When --tab is omitted, the current active tab in the current window is used.',
+    ...createImplicitTabResolutionHelpLines(),
   ];
 }

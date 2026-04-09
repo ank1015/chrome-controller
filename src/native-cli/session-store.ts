@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -13,6 +13,8 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const GENERATED_SESSION_ID_PATTERN = /^s(\d+)$/;
 const CURRENT_SESSION_FILENAME = 'current-session.json';
 const SESSIONS_DIRECTORY_NAME = 'sessions';
+const JSON_READ_RETRY_COUNT = 3;
+const JSON_READ_RETRY_DELAY_MS = 5;
 
 interface CurrentSessionPointer {
   id: string;
@@ -54,6 +56,7 @@ export class SessionStore {
       createdAt: timestamp,
       updatedAt: timestamp,
       lastUsedAt: timestamp,
+      targetTabId: null,
     };
 
     await this.writeSession(session);
@@ -251,6 +254,28 @@ export class SessionStore {
     await writeJsonFile(this.getSessionPath(session.id), session);
   }
 
+  async setTargetTab(id: string, targetTabId: number): Promise<CliSessionRecord> {
+    const session = await this.getSession(id);
+    if (!session) {
+      throw new Error(`Session "${id}" does not exist`);
+    }
+
+    return await this.writeUpdatedSession(session, {
+      targetTabId: normalizeTargetTabId(targetTabId),
+    });
+  }
+
+  async clearTargetTab(id: string): Promise<CliSessionRecord> {
+    const session = await this.getSession(id);
+    if (!session) {
+      throw new Error(`Session "${id}" does not exist`);
+    }
+
+    return await this.writeUpdatedSession(session, {
+      targetTabId: null,
+    });
+  }
+
   async writeCurrentSession(pointer: CurrentSessionPointer): Promise<void> {
     await this.ensureStorage();
     await writeJsonFile(this.currentSessionPath, pointer);
@@ -284,6 +309,22 @@ export class SessionStore {
     }
 
     return `s${maxId + 1}`;
+  }
+
+  private async writeUpdatedSession(
+    session: CliSessionRecord,
+    updates: Partial<CliSessionRecord>
+  ): Promise<CliSessionRecord> {
+    const timestamp = this.#now().toISOString();
+    const updatedSession: CliSessionRecord = {
+      ...session,
+      ...updates,
+      updatedAt: timestamp,
+      lastUsedAt: timestamp,
+    };
+
+    await this.writeSession(updatedSession);
+    return updatedSession;
   }
 }
 
@@ -332,24 +373,62 @@ function normalizeStoredSession(session: CliSessionRecord, fallbackId: string): 
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastUsedAt: session.lastUsedAt,
+    targetTabId: normalizeStoredTargetTabId((session as Partial<CliSessionRecord>).targetTabId),
   };
 }
 
-async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const raw = await readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null;
-    }
-
-    throw error;
+function normalizeStoredTargetTabId(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
   }
+
+  return normalizeTargetTabId(value);
+}
+
+function normalizeTargetTabId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`Stored target tab id is invalid: ${String(value)}`);
+  }
+
+  return value;
+}
+
+async function readJsonFile<T>(filePath: string): Promise<T | null> {
+  for (let attempt = 0; attempt <= JSON_READ_RETRY_COUNT; attempt += 1) {
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return null;
+      }
+
+      if (
+        attempt < JSON_READ_RETRY_COUNT &&
+        isRetryableJsonReadError(error)
+      ) {
+        await sleep(JSON_READ_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return null;
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random()
+    .toString(16)
+    .slice(2)}.tmp`;
+
+  try {
+    await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await rename(tempPath, filePath);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -358,4 +437,12 @@ function isMissingFileError(error: unknown): boolean {
     'code' in error &&
     (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
+}
+
+function isRetryableJsonReadError(error: unknown): boolean {
+  return error instanceof SyntaxError;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
