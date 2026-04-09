@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "ank1015-llm-extension",
-  "version": "0.1",
+  "name": "ank1015-chrome-controller",
+  "version": "0.0.1",
   "description": "Connect Chrome to LLM agents so they can inspect pages, automate browser tasks, and control tabs through a native bridge.",
   "icons": {
     "16": "icons/icon16.png",

@@ -42,7 +42,7 @@ You can use the SDK to:
 Import the SDK from the root package:
 
 ```ts
-import { connectChromeController } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/chrome-controller';
 ```
 
 ## Safety model

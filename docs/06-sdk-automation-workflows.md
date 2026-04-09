@@ -40,13 +40,13 @@ SDK scripts should be explicit about which tab they target and what they do.
 ## Install and import
 
 ```bash
-npm install @ank1015/llm-extension
+npm install @ank1015/chrome-controller
 ```
 
 Recommended import:
 
 ```ts
-import { connectChromeController } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/chrome-controller';
 ```
 The SDK is exported from the root package.
 
@@ -80,7 +80,7 @@ await chrome.close();
 This example finds an existing tab, opens one if needed, reads page data, and closes the connection cleanly.
 
 ```ts
-import { connectChromeController } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/chrome-controller';
 
 async function main() {
   const chrome = await connectChromeController();
@@ -328,7 +328,7 @@ Use `try/finally` around:
 ## Example workflow: scrape a structured report
 
 ```ts
-import { connectChromeController } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/chrome-controller';
 
 export async function scrapeReport() {
   const chrome = await connectChromeController();
@@ -388,7 +388,7 @@ async function waitFor(
 ## Example workflow: capture network activity for a page
 
 ```ts
-import { connectChromeController } from '@ank1015/llm-extension';
+import { connectChromeController } from '@ank1015/chrome-controller';
 
 export async function captureRequests(url: string) {
   const chrome = await connectChromeController();
@@ -430,7 +430,7 @@ export async function captureRequests(url: string) {
 
 ## Best practices
 
-- Import the SDK from `@ank1015/llm-extension`.
+- Import the SDK from `@ank1015/chrome-controller`.
 - Keep scripts explicit about how they find their tab.
 - Prefer `evaluate` for page-native read and write logic once the page is understood.
 - Use debugger sessions only when you need CDP domains or event streams.

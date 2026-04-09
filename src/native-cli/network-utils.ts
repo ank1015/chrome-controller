@@ -208,7 +208,7 @@ export function buildHar(events: CliDebuggerEvent[]): Record<string, unknown> {
       version: '1.2',
       creator: {
         name: 'chrome-controller',
-        version: '0.0.14',
+        version: '0.0.1',
       },
       pages: [
         {
