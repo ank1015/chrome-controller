@@ -1,6 +1,6 @@
 ---
 name: chrome-controller
-description: Control Chrome with the `chrome-controller` CLI and build repeatable browser workflows with the root-package SDK. Use when Codex needs to inspect or manipulate real browser tabs and pages, manage sessions/windows/tabs, navigate pages, snapshot and interact with elements, capture debugger/console/network state, manage cookies/storage/uploads/downloads, or convert an explored browser task into a reusable script with `connectChromeController`.
+description: Control Chrome with the `chrome-controller` CLI and build repeatable browser workflows with the root-package SDK. Use when you need to inspect or manipulate real browser tabs and pages, manage sessions/windows/tabs, navigate pages, snapshot and interact with elements, capture debugger/console/network state, manage cookies/storage/uploads/downloads, or convert an explored browser task into a reusable script with `connectChromeController`.
 ---
 
 # Chrome Controller Guide
