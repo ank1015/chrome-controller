@@ -4,11 +4,9 @@ import { dirname, resolve } from 'node:path';
 import { SessionStore } from '../session-store.js';
 
 import {
-  createImplicitTabUrlScopeHelpLines,
-  parseOptionalTabFlag,
   parsePositiveInteger,
+  resolveManagedCurrentTab,
   resolveSession,
-  resolveTab,
 } from './support.js';
 
 import type {
@@ -66,17 +64,11 @@ async function runListCookiesCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies list');
-  const parsed = parseCookieScopeOptions(args, {
+  const parsed = parseCookieScopeOptions(rawArgs, {
     allowAll: true,
     allowLimit: true,
   });
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
+  const { session, scope } = await resolveCookieCommandScope(options, parsed.scope);
   const cookies = await options.browserService.listCookies(session, scopeToFilter(scope));
   const limitedCookies = cookies.slice(0, parsed.limit);
 
@@ -101,10 +93,9 @@ async function runGetCookieCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies get');
-  const [name, ...rest] = args;
+  const [name, ...rest] = rawArgs;
   if (!name) {
-    throw new Error('Usage: chrome-controller cookies get <name> [--url <url>] [--tab <id>]');
+    throw new Error('Usage: chrome-controller state cookies get <name> [--url <url>]');
   }
 
   const parsed = parseCookieScopeOptions(rest);
@@ -112,12 +103,7 @@ async function runGetCookieCommand(
     throw new Error('cookies get does not support --all');
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
+  const { session, scope } = await resolveCookieCommandScope(options, parsed.scope);
   const cookie = await options.browserService.getCookie(session, name, scopeToFilter(scope));
 
   return {
@@ -139,21 +125,15 @@ async function runSetCookieCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies set');
-  const [name, value, ...rest] = args;
+  const [name, value, ...rest] = rawArgs;
   if (!name || value === undefined) {
     throw new Error(
-      'Usage: chrome-controller cookies set <name> <value> [--url <url>] [--path <path>] [--domain <domain>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>] [--tab <id>]'
+      'Usage: chrome-controller state cookies set <name> <value> [--url <url>] [--path <path>] [--domain <domain>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>]'
     );
   }
 
   const parsed = parseSetCookieOptions(rest);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const scope = await resolveCookieScope(options.browserService, session, explicitTabId, {
+  const { session, scope } = await resolveCookieCommandScope(options, {
     ...(parsed.url ? { url: parsed.url } : {}),
     ...(parsed.domain ? { domain: parsed.domain } : {}),
   });
@@ -188,20 +168,14 @@ async function runClearCookiesCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies clear');
-  const [possibleName, ...rest] = args;
+  const [possibleName, ...rest] = rawArgs;
   const name = possibleName && !possibleName.startsWith('--') ? possibleName : undefined;
-  const optionArgs = name ? rest : args;
+  const optionArgs = name ? rest : rawArgs;
   const parsed = parseCookieScopeOptions(optionArgs, {
     allowAll: true,
   });
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
+  const { session, scope } = await resolveCookieCommandScope(options, parsed.scope);
   const outcome = await options.browserService.clearCookies(session, {
     ...scopeToFilter(scope),
     ...(name ? { name } : {}),
@@ -226,23 +200,17 @@ async function runExportCookiesCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies export');
-  const [filePath, ...rest] = args;
+  const [filePath, ...rest] = rawArgs;
   if (!filePath) {
     throw new Error(
-      'Usage: chrome-controller cookies export <path> [--url <url>] [--domain <domain>] [--all] [--tab <id>]'
+      'Usage: chrome-controller state cookies export <path> [--url <url>] [--domain <domain>] [--all]'
     );
   }
 
   const parsed = parseCookieScopeOptions(rest, {
     allowAll: true,
   });
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
+  const { session, scope } = await resolveCookieCommandScope(options, parsed.scope);
   const cookies = await options.browserService.listCookies(session, scopeToFilter(scope));
   const absolutePath = resolve(filePath);
 
@@ -277,28 +245,20 @@ async function runImportCookiesCommand(
   rawArgs: string[],
   options: CookiesCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'cookies import');
-  const [filePath, ...rest] = args;
+  const [filePath, ...rest] = rawArgs;
   if (!filePath) {
     throw new Error(
-      'Usage: chrome-controller cookies import <path> [--url <url>] [--tab <id>]'
+      'Usage: chrome-controller state cookies import <path> [--url <url>]'
     );
   }
 
   const parsed = parseCookieScopeOptions(rest);
   if (parsed.scope.all || parsed.scope.domain) {
-    throw new Error('cookies import only supports --url and --tab');
+    throw new Error('cookies import only supports --url');
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const fallbackScope = await resolveCookieScope(
-    options.browserService,
-    session,
-    explicitTabId,
+  const { session, scope: fallbackScope } = await resolveCookieCommandScope(
+    options,
     parsed.scope
   );
   const absolutePath = resolve(filePath);
@@ -502,26 +462,54 @@ function parseSetCookieOptions(args: string[]): {
 }
 
 async function resolveCookieScope(
-  browserService: BrowserService,
-  session: CliSessionRecord,
-  explicitTabId: number | undefined,
+  options: CookiesCommandOptions,
   scope: CookieScopeOptions
-): Promise<CookieScopeOptions> {
+): Promise<{ session: CliSessionRecord; scope: CookieScopeOptions }> {
   if (scope.all) {
-    return { all: true };
+    const session = await resolveSession(
+      options.sessionStore,
+      options.browserService,
+      options.explicitSessionId
+    );
+    return {
+      session,
+      scope: { all: true },
+    };
   }
   if (scope.url || scope.domain) {
-    return scope;
+    const session = await resolveSession(
+      options.sessionStore,
+      options.browserService,
+      options.explicitSessionId
+    );
+    return {
+      session,
+      scope,
+    };
   }
 
-  const tab = await resolveTab(browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   if (!tab.url) {
     throw new Error('Current tab does not have a URL that can be used for cookies');
   }
 
   return {
-    url: tab.url,
+    session,
+    scope: {
+      url: tab.url,
+    },
   };
+}
+
+async function resolveCookieCommandScope(
+  options: CookiesCommandOptions,
+  scope: CookieScopeOptions
+): Promise<{ session: CliSessionRecord; scope: CookieScopeOptions }> {
+  return await resolveCookieScope(options, scope);
 }
 
 function scopeToFilter(scope: CookieScopeOptions): { url?: string; domain?: string } {
@@ -618,15 +606,15 @@ function createCookiesHelpLines(): string[] {
   return [
     'Cookies commands',
     '',
-    'Usage:',
-    '  chrome-controller cookies list [--url <url>] [--domain <domain>] [--all] [--limit <n>] [--tab <id>]',
-    '  chrome-controller cookies get <name> [--url <url>] [--tab <id>]',
-    '  chrome-controller cookies set <name> <value> [--url <url>] [--domain <domain>] [--path <path>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>] [--tab <id>]',
-    '  chrome-controller cookies clear [name] [--url <url>] [--domain <domain>] [--all] [--tab <id>]',
-    '  chrome-controller cookies export <path> [--url <url>] [--domain <domain>] [--all] [--tab <id>]',
-    '  chrome-controller cookies import <path> [--url <url>] [--tab <id>]',
+    "All cookies commands use the active session's current tab URL by default.",
+    'Use `tabs use <tabId>` to switch which tab cookies commands scope themselves to by default.',
     '',
-    'Notes:',
-    ...createImplicitTabUrlScopeHelpLines(),
+    'Usage:',
+    '  chrome-controller state cookies list [--url <url>] [--domain <domain>] [--all] [--limit <n>]',
+    '  chrome-controller state cookies get <name> [--url <url>]',
+    '  chrome-controller state cookies set <name> <value> [--url <url>] [--domain <domain>] [--path <path>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>]',
+    '  chrome-controller state cookies clear [name] [--url <url>] [--domain <domain>] [--all]',
+    '  chrome-controller state cookies export <path> [--url <url>] [--domain <domain>] [--all]',
+    '  chrome-controller state cookies import <path> [--url <url>]',
   ];
 }

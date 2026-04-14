@@ -108,7 +108,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -228,12 +228,17 @@ describe('native CLI network commands', () => {
 
   it('starts capture and summarizes existing network traffic', async () => {
     const start = await runCliCommand(
-      ['network', 'start', '--no-clear', '--disable-cache', '--json'],
+      ['observe', 'network', 'start', '--no-clear', '--disable-cache', '--json'],
       tempHome,
       browserService,
       now
     );
-    const summary = await runCliCommand(['network', 'summary', '--json'], tempHome, browserService, now);
+    const summary = await runCliCommand(
+      ['observe', 'network', 'summary', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
 
     const startPayload = JSON.parse(start.stdout);
     const summaryPayload = JSON.parse(summary.stdout);
@@ -259,25 +264,30 @@ describe('native CLI network commands', () => {
 
   it('lists requests, gets an individual request, clears, and exports har', async () => {
     const list = await runCliCommand(
-      ['network', 'list', '--failed', '--json'],
+      ['observe', 'network', 'list', '--failed', '--json'],
       tempHome,
       browserService,
       now
     );
     const get = await runCliCommand(
-      ['network', 'get', 'req-1', '--json'],
+      ['observe', 'network', 'get', 'req-1', '--json'],
       tempHome,
       browserService,
       now
     );
     const harPath = join(tempHome, 'artifacts', 'capture.har');
     const exportHar = await runCliCommand(
-      ['network', 'export-har', harPath, '--json'],
+      ['observe', 'network', 'export-har', harPath, '--json'],
       tempHome,
       browserService,
       now
     );
-    const clear = await runCliCommand(['network', 'clear', '--json'], tempHome, browserService, now);
+    const clear = await runCliCommand(
+      ['observe', 'network', 'clear', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
 
     const listPayload = JSON.parse(list.stdout);
     const getPayload = JSON.parse(get.stdout);
@@ -321,24 +331,29 @@ describe('native CLI network commands', () => {
 
   it('applies blocking, offline, throttle, and stop commands', async () => {
     const block = await runCliCommand(
-      ['network', 'block', '*://*.ads.com/*', '*://tracker.example/*', '--json'],
+      ['observe', 'network', 'block', '*://*.ads.com/*', '*://tracker.example/*', '--json'],
       tempHome,
       browserService,
       now
     );
     const offline = await runCliCommand(
-      ['network', 'offline', 'on', '--json'],
+      ['observe', 'network', 'offline', 'on', '--json'],
       tempHome,
       browserService,
       now
     );
     const throttle = await runCliCommand(
-      ['network', 'throttle', 'fast-3g', '--json'],
+      ['observe', 'network', 'throttle', 'fast-3g', '--json'],
       tempHome,
       browserService,
       now
     );
-    const stop = await runCliCommand(['network', 'stop', '--json'], tempHome, browserService, now);
+    const stop = await runCliCommand(
+      ['observe', 'network', 'stop', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
 
     const blockPayload = JSON.parse(block.stdout);
     const offlinePayload = JSON.parse(offline.stdout);
@@ -356,5 +371,24 @@ describe('native CLI network commands', () => {
       tabId: 101,
       stopped: true,
     });
+  });
+
+  it('summarizes network activity through the observe surface', async () => {
+    const outcome = await runCliCommand(
+      ['observe', 'network', 'summary', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.summary).toEqual(
+      expect.objectContaining({
+        totalRequests: 2,
+        totalFailures: 1,
+        totalResponses: 1,
+      })
+    );
   });
 });

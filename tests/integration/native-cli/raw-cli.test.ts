@@ -6,7 +6,12 @@ import { runCli } from '../../../src/native-cli/cli.js';
 import { BaseMockBrowserService } from '../../helpers/native-cli/base-mock-browser-service.js';
 import { createCapturedOutput } from '../../helpers/io.js';
 
-import type { BrowserService, CliSessionRecord, CliTabInfo } from '../../../src/native-cli/types.js';
+import type {
+  BrowserService,
+  CliListTabsOptions,
+  CliSessionRecord,
+  CliTabInfo,
+} from '../../../src/native-cli/types.js';
 
 function createNowGenerator(): () => Date {
   const base = Date.parse('2026-04-06T00:00:00.000Z');
@@ -19,39 +24,52 @@ function createTab(overrides: Partial<CliTabInfo> = {}): CliTabInfo {
   return {
     id: overrides.id ?? 101,
     windowId: overrides.windowId ?? 11,
-    active: overrides.active ?? true,
+    active: overrides.active ?? false,
     pinned: false,
     audible: false,
     muted: false,
-    title: overrides.title ?? 'Keyboard test',
+    title: overrides.title ?? 'Raw tab',
     url: overrides.url ?? 'https://example.com',
     index: overrides.index ?? 0,
-    status: overrides.status ?? 'complete',
-    groupId: overrides.groupId ?? -1,
+    status: 'complete',
+    groupId: -1,
   };
 }
 
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
-  async listTabs(session: CliSessionRecord): Promise<CliTabInfo[]> {
+  private readonly tabs = [
+    createTab({ id: 101, active: true, title: 'Active raw tab' }),
+  ];
+
+  private readonly attachedTabs = new Set<number>();
+
+  async callBrowserMethod(method: string, ...args: unknown[]): Promise<unknown> {
     this.calls.push({
-      method: 'listTabs',
-      sessionId: session.id,
+      method: 'callBrowserMethod',
       payload: {
-        windowId: 11,
+        method,
+        args,
       },
     });
 
-    return [createTab()];
+    return {
+      ok: true,
+      method,
+      args,
+    };
   }
 
-  async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
+  async listTabs(
+    session: CliSessionRecord,
+    options: CliListTabsOptions = { windowId: 11 }
+  ): Promise<CliTabInfo[]> {
     this.calls.push({
-      method: 'activateTab',
+      method: 'listTabs',
       sessionId: session.id,
-      payload: tabId,
+      payload: options,
     });
 
-    return createTab({ id: tabId, active: true });
+    return this.tabs.map((tab) => ({ ...tab }));
   }
 
   async attachDebugger(
@@ -64,9 +82,11 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
+    const alreadyAttached = this.attachedTabs.has(tabId);
+    this.attachedTabs.add(tabId);
     return {
       attached: true,
-      alreadyAttached: false,
+      alreadyAttached,
     };
   }
 
@@ -80,6 +100,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
+    this.attachedTabs.delete(tabId);
     return {
       detached: true,
     };
@@ -101,7 +122,11 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       },
     });
 
-    return {};
+    return {
+      ok: true,
+      method,
+      params: params ?? null,
+    };
   }
 }
 
@@ -128,13 +153,13 @@ async function runCliCommand(
   };
 }
 
-describe('native CLI keyboard commands', () => {
+describe('native CLI raw commands', () => {
   let tempHome: string;
   let now: () => Date;
   let browserService: MockBrowserService;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'chrome-controller-cli-keyboard-'));
+    tempHome = await mkdtemp(join(tmpdir(), 'chrome-controller-cli-raw-'));
     now = createNowGenerator();
     browserService = new MockBrowserService();
   });
@@ -143,9 +168,9 @@ describe('native CLI keyboard commands', () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  it('presses a named key through the debugger input domain', async () => {
+  it('calls raw browser methods without resolving a session', async () => {
     const outcome = await runCliCommand(
-      ['keyboard', 'press', 'Enter', '--json'],
+      ['raw', 'browser', 'tabs.update', '[101,{"active":true}]', '--json'],
       tempHome,
       browserService,
       now
@@ -153,10 +178,61 @@ describe('native CLI keyboard commands', () => {
     const payload = JSON.parse(outcome.stdout);
 
     expect(outcome.exitCode).toBe(0);
+    expect(payload.sessionId).toBeNull();
+    expect(payload.data).toEqual({
+      method: 'tabs.update',
+      args: [101, { active: true }],
+      result: {
+        ok: true,
+        method: 'tabs.update',
+        args: [101, { active: true }],
+      },
+    });
+    expect(browserService.calls).toEqual([
+      {
+        method: 'callBrowserMethod',
+        payload: {
+          method: 'tabs.update',
+          args: [101, { active: true }],
+        },
+      },
+    ]);
+  });
+
+  it('calls raw cdp on the active session tab and detaches when needed', async () => {
+    const outcome = await runCliCommand(
+      [
+        'raw',
+        'cdp',
+        'Runtime.evaluate',
+        '{"expression":"document.title","returnByValue":true}',
+        '--json',
+      ],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.sessionId).toBe('s1');
     expect(payload.data).toEqual({
       tabId: 101,
-      key: 'Enter',
-      count: 1,
+      method: 'Runtime.evaluate',
+      params: {
+        expression: 'document.title',
+        returnByValue: true,
+      },
+      attached: true,
+      alreadyAttached: false,
+      result: {
+        ok: true,
+        method: 'Runtime.evaluate',
+        params: {
+          expression: 'document.title',
+          returnByValue: true,
+        },
+      },
     });
     expect(browserService.calls).toEqual([
       {
@@ -174,11 +250,6 @@ describe('native CLI keyboard commands', () => {
         },
       },
       {
-        method: 'activateTab',
-        sessionId: 's1',
-        payload: 101,
-      },
-      {
         method: 'attachDebugger',
         sessionId: 's1',
         payload: 101,
@@ -188,47 +259,10 @@ describe('native CLI keyboard commands', () => {
         sessionId: 's1',
         payload: {
           tabId: 101,
-          method: 'Input.dispatchKeyEvent',
+          method: 'Runtime.evaluate',
           params: {
-            type: 'keyDown',
-            key: 'Enter',
-            code: 'Enter',
-            windowsVirtualKeyCode: 13,
-            nativeVirtualKeyCode: 13,
-            text: '\r',
-            unmodifiedText: '\r',
-          },
-        },
-      },
-      {
-        method: 'sendDebuggerCommand',
-        sessionId: 's1',
-        payload: {
-          tabId: 101,
-          method: 'Input.dispatchKeyEvent',
-          params: {
-            type: 'char',
-            key: 'Enter',
-            code: 'Enter',
-            text: '\r',
-            unmodifiedText: '\r',
-            windowsVirtualKeyCode: 13,
-            nativeVirtualKeyCode: 13,
-          },
-        },
-      },
-      {
-        method: 'sendDebuggerCommand',
-        sessionId: 's1',
-        payload: {
-          tabId: 101,
-          method: 'Input.dispatchKeyEvent',
-          params: {
-            type: 'keyUp',
-            key: 'Enter',
-            code: 'Enter',
-            windowsVirtualKeyCode: 13,
-            nativeVirtualKeyCode: 13,
+            expression: 'document.title',
+            returnByValue: true,
           },
         },
       },
@@ -236,49 +270,6 @@ describe('native CLI keyboard commands', () => {
         method: 'detachDebugger',
         sessionId: 's1',
         payload: 101,
-      },
-    ]);
-  });
-
-  it('types text as a sequence of insertText commands', async () => {
-    const outcome = await runCliCommand(
-      ['keyboard', 'type', 'hi', '--delay-ms', '0', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const payload = JSON.parse(outcome.stdout);
-
-    expect(outcome.exitCode).toBe(0);
-    expect(payload.data).toEqual({
-      tabId: 101,
-      text: 'hi',
-      delayMs: 0,
-    });
-    expect(
-      browserService.calls.filter((call) => call.method === 'sendDebuggerCommand')
-    ).toEqual([
-      {
-        method: 'sendDebuggerCommand',
-        sessionId: 's1',
-        payload: {
-          tabId: 101,
-          method: 'Input.insertText',
-          params: {
-            text: 'h',
-          },
-        },
-      },
-      {
-        method: 'sendDebuggerCommand',
-        sessionId: 's1',
-        payload: {
-          tabId: 101,
-          method: 'Input.insertText',
-          params: {
-            text: 'i',
-          },
-        },
       },
     ]);
   });

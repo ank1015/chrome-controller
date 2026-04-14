@@ -31,6 +31,10 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_POLL_MS = 250;
 
 export class ChromeBrowserService implements BrowserService {
+  async callBrowserMethod(method: string, ...args: unknown[]): Promise<unknown> {
+    return await this.callChrome(method, ...args);
+  }
+
   async createManagedSessionWindow(session: CliSessionRecord): Promise<CliWindowInfo> {
     const bridge = await connectManagedChromeBridge({
       launch: true,

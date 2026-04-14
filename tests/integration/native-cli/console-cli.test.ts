@@ -71,7 +71,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -208,7 +208,7 @@ describe('native CLI console commands', () => {
 
   it('lists recent console entries and enables console monitoring automatically', async () => {
     const outcome = await runCliCommand(
-      ['console', 'list', '--limit', '2', '--json'],
+      ['observe', 'console', 'list', '--limit', '2', '--json'],
       tempHome,
       browserService,
       now
@@ -226,7 +226,7 @@ describe('native CLI console commands', () => {
 
   it('tails for new console entries and returns them without timing out', async () => {
     const outcome = await runCliCommand(
-      ['console', 'tail', '--timeout-ms', '20', '--poll-ms', '1', '--json'],
+      ['observe', 'console', 'tail', '--timeout-ms', '20', '--poll-ms', '1', '--json'],
       tempHome,
       browserService,
       now
@@ -242,7 +242,12 @@ describe('native CLI console commands', () => {
   });
 
   it('clears tracked console entries', async () => {
-    const outcome = await runCliCommand(['console', 'clear', '--json'], tempHome, browserService, now);
+    const outcome = await runCliCommand(
+      ['observe', 'console', 'clear', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
     const payload = JSON.parse(outcome.stdout);
 
     expect(outcome.exitCode).toBe(0);
@@ -250,5 +255,21 @@ describe('native CLI console commands', () => {
       tabId: 101,
       clearedCount: 2,
     });
+  });
+
+  it('lists console entries through the observe surface', async () => {
+    const outcome = await runCliCommand(
+      ['observe', 'console', 'list', '--limit', '1', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.count).toBe(1);
+    expect(payload.data.entries).toEqual([
+      expect.objectContaining({ source: 'log', level: 'warning', text: 'warn log' }),
+    ]);
   });
 });

@@ -37,7 +37,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       method: 'listTabs',
       sessionId: session.id,
       payload: {
-        currentWindow: true,
+        windowId: 11,
       },
     });
 

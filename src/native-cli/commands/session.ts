@@ -14,14 +14,12 @@ interface SessionCommandOptions {
 export async function runSessionCommand(
   options: SessionCommandOptions
 ): Promise<CliCommandResult> {
-  const [subcommand = 'current', ...rest] = options.args;
+  const [subcommand = 'info', ...rest] = options.args;
 
   switch (subcommand) {
     case 'create':
-    case 'new':
       return await runCreateSessionCommand(rest, options);
     case 'info':
-    case 'current':
       return await runInfoSessionCommand(rest, options);
     case 'list':
       return await runListSessionsCommand(options);
@@ -31,8 +29,6 @@ export async function runSessionCommand(
       return await runCloseSessionCommand(rest, options);
     case 'reset':
       return await runResetSessionCommand(rest, options);
-    case 'close-all':
-      return await runCloseAllSessionsCommand(options);
     case 'help':
     case '--help':
     case '-h':
@@ -254,25 +250,6 @@ async function runResetSessionCommand(
   };
 }
 
-async function runCloseAllSessionsCommand(
-  options: SessionCommandOptions
-): Promise<CliCommandResult> {
-  const outcome = await options.sessionStore.closeAllSessions();
-  return {
-    data: {
-      closedSessionIds: outcome.closedSessions.map((session) => session.id),
-      closedCount: outcome.closedSessions.length,
-    },
-    lines: [
-      outcome.closedSessions.length === 0
-        ? 'No sessions to close'
-        : `Closed ${outcome.closedSessions.length} session${
-            outcome.closedSessions.length === 1 ? '' : 's'
-          }`,
-    ],
-  };
-}
-
 function readOptionalFlagValue(args: string[], flagName: string): string | null {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -304,7 +281,6 @@ function createSessionHelpLines(): string[] {
     '  chrome-controller session use <id>',
     '  chrome-controller session close [<id>]',
     '  chrome-controller session reset [<id>]',
-    '  chrome-controller session close-all',
   ];
 }
 

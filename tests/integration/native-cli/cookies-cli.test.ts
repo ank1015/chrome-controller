@@ -60,7 +60,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -200,8 +200,18 @@ describe('native CLI cookies commands', () => {
   });
 
   it('lists and gets cookies scoped to the current active tab url by default', async () => {
-    const list = await runCliCommand(['cookies', 'list', '--json'], tempHome, browserService, now);
-    const get = await runCliCommand(['cookies', 'get', 'sid', '--json'], tempHome, browserService, now);
+    const list = await runCliCommand(
+      ['state', 'cookies', 'list', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const get = await runCliCommand(
+      ['state', 'cookies', 'get', 'sid', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
 
     const listPayload = JSON.parse(list.stdout);
     const getPayload = JSON.parse(get.stdout);
@@ -223,6 +233,7 @@ describe('native CLI cookies commands', () => {
   it('sets and clears cookies with a compact payload', async () => {
     const set = await runCliCommand(
       [
+        'state',
         'cookies',
         'set',
         'sid',
@@ -238,7 +249,7 @@ describe('native CLI cookies commands', () => {
       now
     );
     const clear = await runCliCommand(
-      ['cookies', 'clear', 'sid', '--json'],
+      ['state', 'cookies', 'clear', 'sid', '--json'],
       tempHome,
       browserService,
       now
@@ -261,7 +272,7 @@ describe('native CLI cookies commands', () => {
   it('exports and imports cookies through a file', async () => {
     const exportPath = join(tempHome, 'cookies', 'export.json');
     const exportOutcome = await runCliCommand(
-      ['cookies', 'export', exportPath, '--json'],
+      ['state', 'cookies', 'export', exportPath, '--json'],
       tempHome,
       browserService,
       now
@@ -294,7 +305,7 @@ describe('native CLI cookies commands', () => {
     });
 
     const importOutcome = await runCliCommand(
-      ['cookies', 'import', importPath, '--json'],
+      ['state', 'cookies', 'import', importPath, '--json'],
       tempHome,
       browserService,
       now
@@ -324,6 +335,28 @@ describe('native CLI cookies commands', () => {
         storeId: '0',
       },
     });
+  });
+
+  it('lists cookies through the state surface', async () => {
+    const outcome = await runCliCommand(
+      ['state', 'cookies', 'list', '--limit', '1', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.scope).toEqual({
+      url: 'https://example.com/dashboard',
+    });
+    expect(payload.data.count).toBe(1);
+    expect(payload.data.cookies).toEqual([
+      expect.objectContaining({
+        name: 'sid',
+        value: 'cookie-1',
+      }),
+    ]);
   });
 });
 

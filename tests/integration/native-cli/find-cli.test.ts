@@ -67,7 +67,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -241,7 +241,7 @@ describe('native CLI find command', () => {
 
   it('builds a page model, returns the llm-ranked result, and refreshes the snapshot cache', async () => {
     const outcome = await runCliCommand(
-      ['find', 'search box and sign in button', '--json'],
+      ['page', 'find', 'search box and sign in button', '--json'],
       tempHome,
       browserService,
       now

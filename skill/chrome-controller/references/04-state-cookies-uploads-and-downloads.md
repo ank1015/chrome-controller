@@ -10,6 +10,14 @@ This page explains how to manage browser data and files:
 
 Use these commands when you need to preserve state across runs or interact with file inputs and downloaded files.
 
+Preferred command surface:
+
+- `chrome-controller state local ...`
+- `chrome-controller state session ...`
+- `chrome-controller state save ...`
+- `chrome-controller state load ...`
+- `chrome-controller state cookies ...`
+
 ## Storage commands
 
 Storage commands use the session's current tab by default, with fallback to the active tab in the managed session window.
@@ -22,7 +30,7 @@ They cover:
 
 ## Local storage
 
-### `storage local-get [key] [--tab <id>]`
+### `state local get [key]`
 
 Read one localStorage key or all keys.
 
@@ -34,51 +42,51 @@ Behavior:
 Examples:
 
 ```bash
-chrome-controller storage local-get
-chrome-controller storage local-get authToken --json
+chrome-controller state local get
+chrome-controller state local get authToken --json
 ```
 
-### `storage local-set <key> <value> [--tab <id>]`
+### `state local set <key> <value>`
 
 Set one localStorage key.
 
 Example:
 
 ```bash
-chrome-controller storage local-set theme dark
+chrome-controller state local set theme dark
 ```
 
-### `storage local-clear [key] [--tab <id>]`
+### `state local clear [key]`
 
 Clear one localStorage key or all keys.
 
 Examples:
 
 ```bash
-chrome-controller storage local-clear authToken
-chrome-controller storage local-clear
+chrome-controller state local clear authToken
+chrome-controller state local clear
 ```
 
 ## Session storage
 
-### `storage session-get [key] [--tab <id>]`
+### `state session get [key]`
 
 Read one sessionStorage key or all keys.
 
-### `storage session-set <key> <value> [--tab <id>]`
+### `state session set <key> <value>`
 
 Set one sessionStorage key.
 
-### `storage session-clear [key] [--tab <id>]`
+### `state session clear [key]`
 
 Clear one sessionStorage key or all keys.
 
 Examples:
 
 ```bash
-chrome-controller storage session-get
-chrome-controller storage session-set wizardStep 3
-chrome-controller storage session-clear wizardStep
+chrome-controller state session get
+chrome-controller state session set wizardStep 3
+chrome-controller state session clear wizardStep
 ```
 
 ## Full state export and import
@@ -91,17 +99,17 @@ These commands capture:
 
 They are the easiest way to save and restore an authenticated browser state.
 
-### `storage state-save <path> [--tab <id>]`
+### `state save <path>`
 
 Save state to a JSON file.
 
 Example:
 
 ```bash
-chrome-controller storage state-save ./state.json
+chrome-controller state save ./state.json
 ```
 
-### `storage state-load <path> [--reload] [--tab <id>]`
+### `state load <path> [--reload]`
 
 Load state from a JSON file.
 
@@ -112,7 +120,7 @@ Options:
 Example:
 
 ```bash
-chrome-controller storage state-load ./state.json --reload
+chrome-controller state load ./state.json --reload
 ```
 
 ## Cookies commands
@@ -122,7 +130,7 @@ Cookie commands use the session's current tab URL first when you do not provide 
 That means this works:
 
 ```bash
-chrome-controller cookies list
+chrome-controller state cookies list
 ```
 
 You can override the scope with:
@@ -133,7 +141,7 @@ You can override the scope with:
 
 ## Cookie listing and lookup
 
-### `cookies list [--url <url>] [--domain <domain>] [--all] [--limit <n>] [--tab <id>]`
+### `state cookies list [--url <url>] [--domain <domain>] [--all] [--limit <n>]`
 
 List cookies in scope.
 
@@ -147,25 +155,25 @@ Options:
 Examples:
 
 ```bash
-chrome-controller cookies list
-chrome-controller cookies list --domain example.com --json
-chrome-controller cookies list --all --limit 200 --json
+chrome-controller state cookies list
+chrome-controller state cookies list --domain example.com --json
+chrome-controller state cookies list --all --limit 200 --json
 ```
 
-### `cookies get <name> [--url <url>] [--tab <id>]`
+### `state cookies get <name> [--url <url>]`
 
 Get one cookie by name.
 
 Example:
 
 ```bash
-chrome-controller cookies get sessionid --json
-chrome-controller cookies get sessionid --url https://example.com --json
+chrome-controller state cookies get sessionid --json
+chrome-controller state cookies get sessionid --url https://example.com --json
 ```
 
 ## Set and clear cookies
 
-### `cookies set <name> <value> [--url <url>] [--domain <domain>] [--path <path>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>] [--tab <id>]`
+### `state cookies set <name> <value> [--url <url>] [--domain <domain>] [--path <path>] [--secure] [--http-only] [--same-site <value>] [--expires <unixSeconds>]`
 
 Set a cookie.
 
@@ -182,11 +190,11 @@ Options:
 Examples:
 
 ```bash
-chrome-controller cookies set session abc123 --url https://example.com
-chrome-controller cookies set consent yes --domain example.com --path / --secure
+chrome-controller state cookies set session abc123 --url https://example.com
+chrome-controller state cookies set consent yes --domain example.com --path / --secure
 ```
 
-### `cookies clear [name] [--url <url>] [--domain <domain>] [--all] [--tab <id>]`
+### `state cookies clear [name] [--url <url>] [--domain <domain>] [--all]`
 
 Clear cookies in scope.
 
@@ -198,38 +206,38 @@ Behavior:
 Examples:
 
 ```bash
-chrome-controller cookies clear sessionid
-chrome-controller cookies clear --domain example.com
-chrome-controller cookies clear --all
+chrome-controller state cookies clear sessionid
+chrome-controller state cookies clear --domain example.com
+chrome-controller state cookies clear --all
 ```
 
 ## Export and import cookies
 
-### `cookies export <path> [--url <url>] [--domain <domain>] [--all] [--tab <id>]`
+### `state cookies export <path> [--url <url>] [--domain <domain>] [--all]`
 
 Export cookies to a JSON file.
 
 Example:
 
 ```bash
-chrome-controller cookies export ./cookies.json
+chrome-controller state cookies export ./cookies.json
 ```
 
-### `cookies import <path> [--url <url>] [--tab <id>]`
+### `state cookies import <path> [--url <url>]`
 
 Import cookies from a JSON file.
 
 Example:
 
 ```bash
-chrome-controller cookies import ./cookies.json
+chrome-controller state cookies import ./cookies.json
 ```
 
 ## Upload command
 
 Use uploads for file input elements.
 
-### `upload files <selector> <path...> [--tab <id>]`
+### `upload files <selector> <path...>`
 
 Attach one or more local files to a file input.
 
@@ -250,7 +258,7 @@ Use download commands to find, wait for, cancel, or erase downloaded items.
 
 ## Download listing
 
-### `downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]`
+### `observe downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]`
 
 List downloads with optional filters.
 
@@ -266,14 +274,14 @@ Options:
 Examples:
 
 ```bash
-chrome-controller downloads list
-chrome-controller downloads list --state complete --json
-chrome-controller downloads list --filename-includes report --mime application/pdf --json
+chrome-controller observe downloads list
+chrome-controller observe downloads list --state complete --json
+chrome-controller observe downloads list --filename-includes report --mime application/pdf --json
 ```
 
 ## Wait for a download
 
-### `downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]`
+### `observe downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]`
 
 Wait for a matching download.
 
@@ -288,8 +296,8 @@ Options:
 Examples:
 
 ```bash
-chrome-controller downloads wait --filename-includes report --timeout-ms 20000 --json
-chrome-controller downloads wait --mime application/pdf --allow-incomplete --json
+chrome-controller observe downloads wait --filename-includes report --timeout-ms 20000 --json
+chrome-controller observe downloads wait --mime application/pdf --allow-incomplete --json
 ```
 
 You can also call the same behavior through:
@@ -300,24 +308,24 @@ chrome-controller wait download --filename-includes report --timeout-ms 20000
 
 ## Cancel and erase downloads
 
-### `downloads cancel <downloadId...>`
+### `observe downloads cancel <downloadId...>`
 
 Cancel one or more downloads.
 
 Example:
 
 ```bash
-chrome-controller downloads cancel 11 12
+chrome-controller observe downloads cancel 11 12
 ```
 
-### `downloads erase <downloadId...>`
+### `observe downloads erase <downloadId...>`
 
 Erase one or more downloads from Chrome's download history.
 
 Example:
 
 ```bash
-chrome-controller downloads erase 11 12
+chrome-controller observe downloads erase 11 12
 ```
 
 ## Practical state and file workflows
@@ -325,19 +333,19 @@ chrome-controller downloads erase 11 12
 ### Save a login session after signing in manually
 
 ```bash
-chrome-controller storage state-save ./login-state.json
+chrome-controller state save ./login-state.json
 ```
 
 ### Restore a saved login session
 
 ```bash
-chrome-controller storage state-load ./login-state.json --reload
+chrome-controller state load ./login-state.json --reload
 ```
 
 ### Seed a site with cookies before loading it
 
 ```bash
-chrome-controller cookies import ./cookies.json
+chrome-controller state cookies import ./cookies.json
 chrome-controller page goto https://example.com
 chrome-controller wait load
 ```
@@ -348,5 +356,5 @@ chrome-controller wait load
 chrome-controller page snapshot
 chrome-controller upload files 'input[type=file]' ./input.csv
 chrome-controller element click @e8
-chrome-controller downloads wait --filename-includes report --timeout-ms 30000 --json
+chrome-controller observe downloads wait --filename-includes report --timeout-ms 30000 --json
 ```

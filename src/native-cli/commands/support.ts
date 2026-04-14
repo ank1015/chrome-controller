@@ -59,80 +59,6 @@ export async function createManagedSessionWindow(
   });
 }
 
-export async function resolveTabId(
-  browserService: BrowserService,
-  session: CliSessionRecord,
-  explicitTabId?: number
-): Promise<number> {
-  const tab = await resolveTab(browserService, session, explicitTabId);
-  return tab.id as number;
-}
-
-export async function resolveTab(
-  browserService: BrowserService,
-  session: CliSessionRecord,
-  explicitTabId?: number
-): Promise<{ id: number; url: string | null; title: string | null }> {
-  if (typeof explicitTabId === 'number') {
-    const tab = await browserService.getTab(session, explicitTabId);
-    if (typeof tab.id !== 'number') {
-      throw new Error(`Could not resolve tab ${explicitTabId}`);
-    }
-
-    return {
-      id: tab.id,
-      url: tab.url,
-      title: tab.title,
-    };
-  }
-
-  if (typeof session.targetTabId === 'number') {
-    try {
-      const tab = await browserService.getTab(session, session.targetTabId);
-      if (typeof tab.id !== 'number') {
-        throw new Error(`Could not resolve tab ${session.targetTabId}`);
-      }
-
-      if (typeof session.windowId === 'number' && tab.windowId !== session.windowId) {
-        throw new Error(
-          `Pinned target tab ${session.targetTabId} is no longer in managed window ${session.windowId}`
-        );
-      }
-
-      return {
-        id: tab.id,
-        url: tab.url,
-        title: tab.title,
-      };
-    } catch {
-      // Fall back to the active tab in the managed window when the remembered
-      // session tab has disappeared or moved elsewhere.
-    }
-  }
-
-  const tabs = await browserService.listTabs(
-    session,
-    typeof session.windowId === 'number'
-      ? { windowId: session.windowId }
-      : { currentWindow: true }
-  );
-  const activeTab = tabs.find((tab) => tab.active && typeof tab.id === 'number');
-
-  if (!activeTab || typeof activeTab.id !== 'number') {
-    if (typeof session.windowId === 'number') {
-      throw new Error(`Could not resolve an active tab in managed window ${session.windowId}`);
-    }
-
-    throw new Error('Could not resolve an active tab in the managed session window');
-  }
-
-  return {
-    id: activeTab.id,
-    url: activeTab.url,
-    title: activeTab.title,
-  };
-}
-
 export async function resolveManagedCurrentTab(
   sessionStore: SessionStore,
   browserService: BrowserService,
@@ -187,53 +113,11 @@ export function requireManagedWindowId(session: CliSessionRecord): number {
   return session.windowId;
 }
 
-export function createImplicitTabResolutionHelpLines(): string[] {
-  return [
-    "  When --tab is omitted, the session's current tab is used first.",
-    "  If the session's current tab is missing or not set, the active tab in the managed session window is used.",
-  ];
-}
-
 export function createImplicitTabUrlScopeHelpLines(): string[] {
   return [
     "  When no scope is provided, commands use the session's current tab URL first.",
     "  If the session's current tab is missing or not set, they fall back to the active tab URL in the managed session window.",
   ];
-}
-
-export function parseOptionalTabFlag(
-  args: string[],
-  commandName: string
-): { args: string[]; tabId?: number } {
-  const rest: string[] = [];
-  let tabId: number | undefined;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--tab') {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error(`Missing value for --tab in ${commandName}`);
-      }
-
-      tabId = parsePositiveInteger(value, '--tab');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--tab=')) {
-      tabId = parsePositiveInteger(arg.slice('--tab='.length), '--tab');
-      continue;
-    }
-
-    rest.push(arg);
-  }
-
-  return {
-    args: rest,
-    ...(tabId !== undefined ? { tabId } : {}),
-  };
 }
 
 export function parsePositiveInteger(rawValue: string, flagName: string): number {

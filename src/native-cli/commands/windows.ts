@@ -26,7 +26,6 @@ export async function runWindowsCommand(
 
   switch (subcommand) {
     case 'info':
-    case 'current':
       return await runWindowInfoCommand(rest, options);
     case 'focus':
       return await runFocusWindowCommand(rest, options);

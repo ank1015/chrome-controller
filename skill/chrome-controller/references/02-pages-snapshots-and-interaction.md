@@ -19,7 +19,7 @@ Page and element commands first use the session's current tab when one is set.
 
 If the session does not have a current tab remembered yet, they fall back to the active tab in the managed session window.
 
-That is convenient, but it also means `page goto` without `--tab` can replace the currently active tab when you have not pinned a target yet.
+That is convenient, but it also means `page goto` can replace the currently active tab when you have not pinned a target yet.
 
 If you are not fully sure which tab is active, first pin the work to a target tab:
 
@@ -150,7 +150,6 @@ Notes:
 - `--limit` is a maximum, not a guarantee of exact coverage
 - the command prefers over-inclusion to under-inclusion
 - `--json` includes both the generated page-model markdown and the LLM-ranked markdown result, which is useful for debugging
-- top-level `find` remains as a compatibility alias, but `page find` is the primary command shape
 
 ## Page commands
 
@@ -437,7 +436,7 @@ Useful named keys include:
 
 Single characters also work.
 
-### `keyboard press <key> [--count <n>] [--tab <id>]`
+### `keyboard press <key> [--count <n>]`
 
 Press and release a key.
 
@@ -462,7 +461,7 @@ chrome-controller wait idle 500
 chrome-controller page snapshot
 ```
 
-### `keyboard type <text> [--delay-ms <n>] [--tab <id>]`
+### `keyboard type <text> [--delay-ms <n>]`
 
 Type freeform text.
 
@@ -477,11 +476,11 @@ chrome-controller keyboard type "hello world"
 chrome-controller keyboard type "123456" --delay-ms 20
 ```
 
-### `keyboard down <key> [--tab <id>]`
+### `keyboard down <key>`
 
 Hold a key down.
 
-### `keyboard up <key> [--tab <id>]`
+### `keyboard up <key>`
 
 Release a key.
 
@@ -509,11 +508,11 @@ They are most useful for:
 
 Use `element box` first when you need reliable coordinates.
 
-### `mouse move <x> <y> [--tab <id>]`
+### `mouse move <x> <y>`
 
 Move the pointer.
 
-### `mouse click <x> <y> [--button <left|middle|right>] [--count <n>] [--tab <id>]`
+### `mouse click <x> <y> [--button <left|middle|right>] [--count <n>]`
 
 Click at coordinates.
 
@@ -522,15 +521,15 @@ Options:
 - `--button`: choose `left`, `middle`, or `right`
 - `--count <n>`: single, double, or repeated clicks
 
-### `mouse down <x> <y> [--button <left|middle|right>] [--tab <id>]`
+### `mouse down <x> <y> [--button <left|middle|right>]`
 
 Press a mouse button and keep it down.
 
-### `mouse up <x> <y> [--button <left|middle|right>] [--tab <id>]`
+### `mouse up <x> <y> [--button <left|middle|right>]`
 
 Release a mouse button.
 
-### `mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>] [--tab <id>]`
+### `mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>]`
 
 Scroll by wheel delta.
 
@@ -541,7 +540,7 @@ Options:
 - `--x <x>`: pointer x position while wheeling
 - `--y <y>`: pointer y position while wheeling
 
-### `mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>] [--tab <id>]`
+### `mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>]`
 
 Drag from one coordinate to another.
 
@@ -564,12 +563,16 @@ Wait commands are how you make scripts reliable.
 
 They help you avoid racing the page.
 
+All wait commands except `wait idle` act on the active session's current tab.
+
+Use `tabs use <tabId>` first when you want wait commands to target another tab in the managed session window.
+
 Defaults:
 
 - `wait element`, `wait text`, `wait url`, `wait load`, and `wait fn` default to a 30 second timeout
 - they poll every 250 ms unless you override `--poll-ms`
 
-### `wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait for an element state.
 
@@ -587,7 +590,7 @@ chrome-controller wait element @e3 --state visible
 chrome-controller wait element '#submit' --state enabled --timeout-ms 10000
 ```
 
-### `wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait for text to appear.
 
@@ -603,7 +606,7 @@ chrome-controller wait text "Welcome back"
 chrome-controller wait text "Done" --target @e12
 ```
 
-### `wait url <text> [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait url <text> [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait for the tab URL to contain a string.
 
@@ -613,7 +616,7 @@ Example:
 chrome-controller wait url "/dashboard"
 ```
 
-### `wait load [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait load [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait until the tab reports that loading is complete.
 
@@ -627,7 +630,7 @@ Example:
 chrome-controller wait load
 ```
 
-### `wait stable [--quiet-ms <n>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait stable [--quiet-ms <n>] [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait until the page is quiet enough to interact with reliably.
 
@@ -664,7 +667,7 @@ Example:
 chrome-controller wait idle 500
 ```
 
-### `wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait for a JavaScript condition to become truthy.
 

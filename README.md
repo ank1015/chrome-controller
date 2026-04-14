@@ -22,4 +22,4 @@ npx @ank1015/chrome-controller tabs list --json
 import { connectChromeController } from '@ank1015/chrome-controller';
 ```
 
-See [`docs/06-sdk-automation-workflows.md`](./docs/06-sdk-automation-workflows.md) for SDK usage and automation patterns.
+See [`docs/README.md`](./docs/README.md) for the docs index, CLI guide, and SDK guide.

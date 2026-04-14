@@ -39,12 +39,11 @@ describe('native CLI help text', () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  it('describes current-session-tab resolution for optional --tab commands', async () => {
+  it('describes keyboard, mouse, and upload commands as acting on the session current tab', async () => {
     const commands = [
-      ['console', 'help'],
-      ['storage', 'help'],
+      ['keyboard', 'help'],
+      ['mouse', 'help'],
       ['upload', 'help'],
-      ['debugger', 'help'],
     ];
 
     for (const command of commands) {
@@ -52,15 +51,9 @@ describe('native CLI help text', () => {
 
       expect(outcome.exitCode).toBe(0);
       expect(outcome.stderr).toBe('');
-      expect(outcome.stdout).toContain(
-        "When --tab is omitted, the session's current tab is used first."
-      );
-      expect(outcome.stdout).toContain(
-        "If the session's current tab is missing or not set, the active tab in the managed session window is used."
-      );
-      expect(outcome.stdout).not.toContain(
-        'When --tab is omitted, the current active tab in the current window is used.'
-      );
+      expect(outcome.stdout).toContain("active session's current tab");
+      expect(outcome.stdout).toContain('Use `tabs use <tabId>` to switch which tab');
+      expect(outcome.stdout).not.toContain('[--tab <id>]');
     }
   });
 
@@ -99,19 +92,42 @@ describe('native CLI help text', () => {
     expect(outcome.stdout).not.toContain('[--tab <id>]');
   });
 
-  it('describes current-session-tab-first URL scoping for cookies help', async () => {
-    const outcome = await runCliCommand(['cookies', 'help'], tempHome);
+  it('describes wait, observe, and state commands around the managed session model', async () => {
+    const waitOutcome = await runCliCommand(['wait', 'help'], tempHome);
+    const observeOutcome = await runCliCommand(['observe', 'help'], tempHome);
+    const stateOutcome = await runCliCommand(['state', 'help'], tempHome);
+    const rawOutcome = await runCliCommand(['raw', 'help'], tempHome);
 
-    expect(outcome.exitCode).toBe(0);
-    expect(outcome.stderr).toBe('');
-    expect(outcome.stdout).toContain(
-      "When no scope is provided, commands use the session's current tab URL first."
+    expect(waitOutcome.exitCode).toBe(0);
+    expect(waitOutcome.stderr).toBe('');
+    expect(waitOutcome.stdout).toContain(
+      "All wait commands except `wait idle` act on the active session's current tab."
     );
-    expect(outcome.stdout).toContain(
-      "If the session's current tab is missing or not set, they fall back to the active tab URL in the managed session window."
+    expect(waitOutcome.stdout).toContain('chrome-controller wait idle <ms>');
+    expect(waitOutcome.stdout).not.toContain('[--tab <id>]');
+
+    expect(observeOutcome.exitCode).toBe(0);
+    expect(observeOutcome.stderr).toBe('');
+    expect(observeOutcome.stdout).toContain(
+      'Use observe when you want to inspect runtime signals from the active session.'
     );
-    expect(outcome.stdout).not.toContain(
-      'When no scope is provided, commands default to the current active tab URL.'
+    expect(observeOutcome.stdout).toContain('chrome-controller observe console list');
+    expect(observeOutcome.stdout).toContain('chrome-controller observe network start');
+
+    expect(stateOutcome.exitCode).toBe(0);
+    expect(stateOutcome.stderr).toBe('');
+    expect(stateOutcome.stdout).toContain(
+      "State commands act on the active session's current tab or its URL scope."
     );
+    expect(stateOutcome.stdout).toContain('chrome-controller state local get [key]');
+    expect(stateOutcome.stdout).toContain('chrome-controller state cookies list');
+
+    expect(rawOutcome.exitCode).toBe(0);
+    expect(rawOutcome.stderr).toBe('');
+    expect(rawOutcome.stdout).toContain(
+      'Use raw commands only when the opinionated CLI surface cannot do the job.'
+    );
+    expect(rawOutcome.stdout).toContain('chrome-controller raw browser <method> [argsJson]');
+    expect(rawOutcome.stdout).toContain('chrome-controller raw cdp <method> [paramsJson]');
   });
 });

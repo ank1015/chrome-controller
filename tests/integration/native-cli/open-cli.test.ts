@@ -59,7 +59,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',

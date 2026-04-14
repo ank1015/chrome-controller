@@ -172,6 +172,7 @@ export interface CliCloseOtherTabsOptions {
 }
 
 export interface BrowserService {
+  callBrowserMethod?(method: string, ...args: unknown[]): Promise<unknown>;
   listWindows(session: CliSessionRecord): Promise<CliWindowInfo[]>;
   getCurrentWindow(session: CliSessionRecord): Promise<CliWindowInfo>;
   getWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo>;

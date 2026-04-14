@@ -12,7 +12,7 @@ import {
   summarizeNetworkEventsForStability,
 } from '../wait-support.js';
 import { runDownloadsCommand } from './downloads.js';
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import { resolveManagedCurrentTab, resolveSession } from './support.js';
 
 import type { BrowserService, CliCommandResult, CliRunOptions } from '../types.js';
 
@@ -81,14 +81,8 @@ async function runWaitElementCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait element');
-  const parsed = parseWaitElementArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseWaitElementArgs(rawArgs);
+  const { session, tabId } = await resolveWaitTab(options);
   const target = await resolveElementTarget(options.env, session, tabId, parsed.target);
 
   await waitUntil(
@@ -137,14 +131,8 @@ async function runWaitTextCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait text');
-  const parsed = parseWaitTextArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseWaitTextArgs(rawArgs);
+  const { session, tabId } = await resolveWaitTab(options);
   const target = parsed.target
     ? await resolveElementTarget(options.env, session, tabId, parsed.target)
     : null;
@@ -203,14 +191,8 @@ async function runWaitUrlCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait url');
-  const parsed = parseWaitUrlArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseWaitUrlArgs(rawArgs);
+  const { session, tabId } = await resolveWaitTab(options);
 
   await waitUntil(
     parsed.timeoutMs,
@@ -236,14 +218,8 @@ async function runWaitLoadCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait load');
-  const parsed = parseCommonWaitArgs(args, 'wait load');
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseCommonWaitArgs(rawArgs, 'wait load');
+  const { session, tabId } = await resolveWaitTab(options);
 
   await waitUntil(
     parsed.timeoutMs,
@@ -269,14 +245,8 @@ async function runWaitStableCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait stable');
-  const parsed = parseWaitStableArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseWaitStableArgs(rawArgs);
+  const { session, tabId } = await resolveWaitTab(options);
   const stability = await waitForTabStable(options.browserService, session, tabId, {
     timeoutMs: parsed.timeoutMs,
     pollMs: parsed.pollMs,
@@ -398,33 +368,22 @@ async function runWaitIdleCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait idle');
-  const [rawMs, ...rest] = args;
+  const [rawMs, ...rest] = rawArgs;
   if (!rawMs) {
-    throw new Error('Usage: chrome-controller wait idle <ms> [--tab <id>]');
+    throw new Error('Usage: chrome-controller wait idle <ms>');
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for wait idle: ${rest[0]}`);
   }
 
   const ms = parsePositiveInteger(rawMs, 'ms');
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId =
-    explicitTabId !== undefined
-      ? await resolveTabId(options.browserService, session, explicitTabId)
-      : undefined;
 
   await sleep(ms);
 
   return {
-    session,
+    session: null,
     data: {
       ms,
-      ...(tabId !== undefined ? { tabId } : {}),
     },
     lines: [`Waited ${ms}ms`],
   };
@@ -434,14 +393,8 @@ async function runWaitFnCommand(
   rawArgs: string[],
   options: WaitCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait fn');
-  const parsed = parseWaitFnArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseWaitFnArgs(rawArgs);
+  const { session, tabId } = await resolveWaitTab(options);
 
   await waitUntil(
     parsed.timeoutMs,
@@ -495,6 +448,25 @@ async function waitUntil(
   throw new Error(timeoutMessage);
 }
 
+async function resolveWaitTab(
+  options: WaitCommandOptions
+): Promise<{ session: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['session']; tabId: number }> {
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve the active session tab for session ${session.id}`);
+  }
+
+  return {
+    session,
+    tabId: tab.id,
+  };
+}
+
 async function readStableNetworkEvents(
   browserService: BrowserService,
   session: Awaited<ReturnType<typeof resolveSession>>,
@@ -528,7 +500,7 @@ function parseWaitElementArgs(args: string[]): {
   const [target, ...rest] = args;
   if (!target) {
     throw new Error(
-      'Usage: chrome-controller wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]'
+      'Usage: chrome-controller wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>]'
     );
   }
 
@@ -571,7 +543,7 @@ function parseWaitTextArgs(args: string[]): {
   const [text, ...rest] = args;
   if (!text) {
     throw new Error(
-      'Usage: chrome-controller wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]'
+      'Usage: chrome-controller wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>]'
     );
   }
 
@@ -613,7 +585,7 @@ function parseWaitUrlArgs(args: string[]): {
   const [urlIncludes, ...rest] = args;
   if (!urlIncludes) {
     throw new Error(
-      'Usage: chrome-controller wait url <text> [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]'
+      'Usage: chrome-controller wait url <text> [--timeout-ms <n>] [--poll-ms <n>]'
     );
   }
 
@@ -638,7 +610,7 @@ function parseWaitFnArgs(args: string[]): {
   const [expression, ...rest] = args;
   if (!expression) {
     throw new Error(
-      'Usage: chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]'
+      'Usage: chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>]'
     );
   }
 
@@ -772,14 +744,17 @@ function createWaitHelpLines(): string[] {
   return [
     'Wait commands',
     '',
+    "All wait commands except `wait idle` act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab wait commands operate on.',
+    '',
     'Usage:',
-    '  chrome-controller wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller wait url <text> [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller wait load [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller wait stable [--quiet-ms <n>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller wait idle <ms> [--tab <id>]',
-    '  chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
+    '  chrome-controller wait element <selector|@ref> [--state <visible|attached|hidden|enabled>] [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller wait text <text> [--target <selector|@ref>] [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller wait url <text> [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller wait load [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller wait stable [--quiet-ms <n>] [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller wait idle <ms>',
+    '  chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>]',
     '  chrome-controller wait download [downloads wait options]',
     '',
     'Notes:',

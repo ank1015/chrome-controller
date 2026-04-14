@@ -3,11 +3,9 @@ import { SessionStore } from '../session-store.js';
 import { CONSOLE_EVENT_PREFIXES, toConsoleEntries } from '../console-utils.js';
 
 import {
-  createImplicitTabResolutionHelpLines,
-  parseOptionalTabFlag,
   parsePositiveInteger,
+  resolveManagedCurrentTab,
   resolveSession,
-  resolveTabId,
 } from './support.js';
 
 import type { BrowserService, CliCommandResult } from '../types.js';
@@ -50,14 +48,8 @@ async function runListConsoleCommand(
   rawArgs: string[],
   options: ConsoleCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'console list');
-  const parsed = parseConsoleListOptions(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseConsoleListOptions(rawArgs);
+  const { session, tabId } = await resolveConsoleTab(options);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
 
   const allEntries = await readConsoleEntries(options.browserService, session, tabId);
@@ -85,14 +77,8 @@ async function runTailConsoleCommand(
   rawArgs: string[],
   options: ConsoleCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'console tail');
-  const parsed = parseConsoleTailOptions(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseConsoleTailOptions(rawArgs);
+  const { session, tabId } = await resolveConsoleTab(options);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
 
   const baseline = await readConsoleEntries(options.browserService, session, tabId);
@@ -135,17 +121,11 @@ async function runClearConsoleCommand(
   rawArgs: string[],
   options: ConsoleCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'console clear');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for console clear: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for console clear: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveConsoleTab(options);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
   const clearedCount = await clearConsoleEntries(options.browserService, session, tabId);
 
@@ -194,6 +174,25 @@ async function clearConsoleEntries(
   }
 
   return clearedCount;
+}
+
+async function resolveConsoleTab(
+  options: ConsoleCommandOptions
+): Promise<{ session: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['session']; tabId: number }> {
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve the active session tab for session ${session.id}`);
+  }
+
+  return {
+    session,
+    tabId: tab.id,
+  };
 }
 
 function parseConsoleListOptions(args: string[]): { limit: number; clear: boolean } {
@@ -299,12 +298,12 @@ function createConsoleHelpLines(): string[] {
   return [
     'Console commands',
     '',
-    'Usage:',
-    '  chrome-controller console list [--limit <n>] [--clear] [--tab <id>]',
-    '  chrome-controller console tail [--limit <n>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]',
-    '  chrome-controller console clear [--tab <id>]',
+    "All console commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab console commands operate on.',
     '',
-    'Notes:',
-    ...createImplicitTabResolutionHelpLines(),
+    'Usage:',
+    '  chrome-controller observe console list [--limit <n>] [--clear]',
+    '  chrome-controller observe console tail [--limit <n>] [--timeout-ms <n>] [--poll-ms <n>]',
+    '  chrome-controller observe console clear',
   ];
 }

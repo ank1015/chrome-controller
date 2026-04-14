@@ -130,7 +130,7 @@ describe('native CLI downloads commands', () => {
 
   it('lists downloads with filters and a compact limit', async () => {
     const outcome = await runCliCommand(
-      ['downloads', 'list', '--state', 'complete', '--limit', '2', '--json'],
+      ['observe', 'downloads', 'list', '--state', 'complete', '--limit', '2', '--json'],
       tempHome,
       browserService,
       now
@@ -149,6 +149,7 @@ describe('native CLI downloads commands', () => {
   it('waits for a matching download with timeout options', async () => {
     const outcome = await runCliCommand(
       [
+        'observe',
         'downloads',
         'wait',
         '--filename-includes',
@@ -190,13 +191,13 @@ describe('native CLI downloads commands', () => {
 
   it('cancels and erases downloads by id', async () => {
     const cancel = await runCliCommand(
-      ['downloads', 'cancel', '2', '3', '--json'],
+      ['observe', 'downloads', 'cancel', '2', '3', '--json'],
       tempHome,
       browserService,
       now
     );
     const erase = await runCliCommand(
-      ['downloads', 'erase', '1', '--json'],
+      ['observe', 'downloads', 'erase', '1', '--json'],
       tempHome,
       browserService,
       now

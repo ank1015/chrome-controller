@@ -281,7 +281,7 @@ function parseDownloadsWaitOptions(args: string[]): {
 function parseDownloadIds(args: string[], commandName: string): number[] {
   if (args.length === 0) {
     throw new Error(
-      `Usage: chrome-controller downloads ${commandName} <downloadId...>`
+      `Usage: chrome-controller observe downloads ${commandName} <downloadId...>`
     );
   }
 
@@ -306,9 +306,9 @@ function createDownloadsHelpLines(): string[] {
     'Downloads commands',
     '',
     'Usage:',
-    '  chrome-controller downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]',
-    '  chrome-controller downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]',
-    '  chrome-controller downloads cancel <downloadId...>',
-    '  chrome-controller downloads erase <downloadId...>',
+    '  chrome-controller observe downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]',
+    '  chrome-controller observe downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]',
+    '  chrome-controller observe downloads cancel <downloadId...>',
+    '  chrome-controller observe downloads erase <downloadId...>',
   ];
 }

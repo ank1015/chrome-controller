@@ -1,19 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 
-import { getChromeControllerHome, SessionStore } from '../session-store.js';
+import { getChromeControllerHome } from '../session-store.js';
 
-import { parseOptionalTabFlag, parsePositiveInteger, resolveSession, resolveTabId } from './support.js';
+import { parsePositiveInteger } from './support.js';
 
-import type { BrowserService, CliCommandResult, CliRunOptions } from '../types.js';
-
-interface ScreenshotCommandOptions {
-  args: string[];
-  explicitSessionId?: string;
-  sessionStore: SessionStore;
-  browserService: BrowserService;
-  env?: CliRunOptions['env'];
-}
+import type { BrowserService, CliRunOptions, CliSessionRecord } from '../types.js';
 
 interface CaptureScreenshotResult {
   data?: string;
@@ -24,52 +16,6 @@ export interface ParsedScreenshotOptions {
   format: 'png' | 'jpeg' | 'webp';
   quality?: number;
   fullPage: boolean;
-}
-
-export async function runScreenshotCommand(
-  options: ScreenshotCommandOptions
-): Promise<CliCommandResult> {
-  const [subcommand = 'help', ...rest] = options.args;
-
-  switch (subcommand) {
-    case 'take':
-      return await runTakeScreenshotCommand(rest, options);
-    case 'help':
-    case '--help':
-    case '-h':
-      return {
-        lines: createScreenshotHelpLines(),
-      };
-    default:
-      throw new Error(`Unknown screenshot command: ${subcommand}`);
-  }
-}
-
-async function runTakeScreenshotCommand(
-  rawArgs: string[],
-  options: ScreenshotCommandOptions
-): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'screenshot take');
-  const parsed = parseScreenshotOptions(args, options.env);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
-  const result = await captureScreenshotForTab(options.browserService, session, tabId, parsed);
-
-  return {
-    session,
-    data: {
-      tabId,
-      path: parsed.outputPath,
-      format: parsed.format,
-      mimeType: `image/${parsed.format === 'jpeg' ? 'jpeg' : parsed.format}`,
-      sizeBytes: result.sizeBytes,
-    },
-    lines: [`Saved screenshot for tab ${tabId} to ${parsed.outputPath}`],
-  };
 }
 
 export function parseScreenshotOptions(
@@ -139,7 +85,7 @@ export function parseScreenshotOptions(
 
 export async function captureScreenshotForTab(
   browserService: BrowserService,
-  session: Awaited<ReturnType<typeof resolveSession>>,
+  session: CliSessionRecord,
   tabId: number,
   parsed: ParsedScreenshotOptions
 ): Promise<{ sizeBytes: number }> {
@@ -222,17 +168,4 @@ function readRequiredOptionValue(args: string[], index: number, flagName: string
   }
 
   return value;
-}
-
-function createScreenshotHelpLines(): string[] {
-  return [
-    'Screenshot commands',
-    '',
-    'Usage:',
-    '  chrome-controller screenshot take [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page] [--tab <id>]',
-    '',
-    'Notes:',
-    '  When no path is provided, the screenshot is saved under CHROME_CONTROLLER_HOME/artifacts/screenshots.',
-    '  `page screenshot` offers the same capture flow through the page command group.',
-  ];
 }

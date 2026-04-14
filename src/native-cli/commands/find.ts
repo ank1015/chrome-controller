@@ -103,7 +103,7 @@ function parseFindArgs(args: string[]): {
   }
 
   if (!query) {
-    throw new Error('Usage: chrome-controller find <query> [--limit <n>]');
+    throw new Error('Usage: chrome-controller page find <query> [--limit <n>]');
   }
 
   return {

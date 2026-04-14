@@ -88,13 +88,13 @@ Important:
 Use this to inspect requests triggered by one action.
 
 ```bash
-chrome-controller network start --disable-cache --tab 456
+chrome-controller observe network start --disable-cache
 chrome-controller tabs use 456
 chrome-controller element click @e8
 chrome-controller wait idle 1500
-chrome-controller network summary --tab 456 --json
-chrome-controller network list --tab 456 --json
-chrome-controller network get req-123 --tab 456 --json
+chrome-controller observe network summary --json
+chrome-controller observe network list --json
+chrome-controller observe network get req-123 --json
 ```
 
 Tips:
@@ -110,7 +110,7 @@ Use this when the page has a file input.
 ```bash
 chrome-controller tabs use 456
 chrome-controller page snapshot
-chrome-controller upload files 'input[type=file]' ./resume.pdf --tab 456
+chrome-controller upload files 'input[type=file]' ./resume.pdf
 chrome-controller wait idle 1000
 chrome-controller page snapshot
 ```
@@ -128,7 +128,7 @@ Use this when a page action should create a download.
 chrome-controller tabs use 456
 chrome-controller element click @e8
 chrome-controller wait download --filename-includes report --timeout-ms 20000 --json
-chrome-controller downloads list --state complete --json
+chrome-controller observe downloads list --state complete --json
 ```
 
 Useful follow-up commands:
@@ -145,7 +145,7 @@ Use this whenever the page keeps rerendering.
 chrome-controller tabs use 456
 chrome-controller page url
 chrome-controller page title
-chrome-controller wait load --tab 456
+chrome-controller wait load
 chrome-controller wait idle 1000
 chrome-controller page snapshot
 ```

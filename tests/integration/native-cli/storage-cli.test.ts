@@ -55,7 +55,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -299,21 +299,21 @@ describe('native CLI storage commands', () => {
   });
 
   it('gets, sets, and clears local storage on the current active tab', async () => {
-    const getAll = await runCliCommand(['storage', 'local-get', '--json'], tempHome, browserService, now);
+    const getAll = await runCliCommand(['state', 'local', 'get', '--json'], tempHome, browserService, now);
     const set = await runCliCommand(
-      ['storage', 'local-set', 'token', 'updated-token', '--json'],
+      ['state', 'local', 'set', 'token', 'updated-token', '--json'],
       tempHome,
       browserService,
       now
     );
     const getKey = await runCliCommand(
-      ['storage', 'local-get', 'token', '--json'],
+      ['state', 'local', 'get', 'token', '--json'],
       tempHome,
       browserService,
       now
     );
     const clearKey = await runCliCommand(
-      ['storage', 'local-clear', 'theme', '--json'],
+      ['state', 'local', 'clear', 'theme', '--json'],
       tempHome,
       browserService,
       now
@@ -358,19 +358,9 @@ describe('native CLI storage commands', () => {
     });
   });
 
-  it('reads and clears session storage explicitly by tab', async () => {
-    const getSession = await runCliCommand(
-      ['storage', 'session-get', '--tab', '101', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const clearSession = await runCliCommand(
-      ['storage', 'session-clear', '--tab', '101', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
+  it('reads and clears session storage on the current managed tab', async () => {
+    const getSession = await runCliCommand(['state', 'session', 'get', '--json'], tempHome, browserService, now);
+    const clearSession = await runCliCommand(['state', 'session', 'clear', '--json'], tempHome, browserService, now);
 
     const getPayload = JSON.parse(getSession.stdout);
     const clearPayload = JSON.parse(clearSession.stdout);
@@ -396,7 +386,7 @@ describe('native CLI storage commands', () => {
     const statePath = join(tempHome, 'state', 'example-state.json');
 
     const outcome = await runCliCommand(
-      ['storage', 'state-save', statePath, '--json'],
+      ['state', 'save', statePath, '--json'],
       tempHome,
       browserService,
       now
@@ -461,7 +451,7 @@ describe('native CLI storage commands', () => {
     });
 
     const outcome = await runCliCommand(
-      ['storage', 'state-load', statePath, '--reload', '--json'],
+      ['state', 'load', statePath, '--reload', '--json'],
       tempHome,
       browserService,
       now
@@ -552,7 +542,7 @@ describe('native CLI storage commands', () => {
     browserService.reloadFailureMessage = 'Reload failed';
 
     const outcome = await runCliCommand(
-      ['storage', 'state-load', statePath, '--reload', '--json'],
+      ['state', 'load', statePath, '--reload', '--json'],
       tempHome,
       browserService,
       now
@@ -619,6 +609,24 @@ describe('native CLI storage commands', () => {
         payload: 101,
       },
     ]);
+  });
+
+  it('supports the state wrapper for local storage', async () => {
+    const outcome = await runCliCommand(
+      ['state', 'local', 'get', 'token', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tabId: 101,
+      area: 'local',
+      key: 'token',
+      value: 'abc',
+    });
   });
 });
 

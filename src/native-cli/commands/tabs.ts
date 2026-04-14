@@ -32,13 +32,10 @@ export async function runTabsCommand(options: TabsCommandOptions): Promise<CliCo
     case 'list':
       return await runListTabsCommand(rest, options);
     case 'current':
-    case 'get':
       return await runCurrentTabCommand(rest, options);
     case 'new':
-    case 'open':
       return await runNewTabCommand(rest, options);
     case 'use':
-    case 'activate':
       return await runUseTabCommand(rest, options);
     case 'close':
       return await runCloseCurrentTabCommand(rest, options);

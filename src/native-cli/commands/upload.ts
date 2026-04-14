@@ -1,11 +1,6 @@
 import { SessionStore } from '../session-store.js';
 
-import {
-  createImplicitTabResolutionHelpLines,
-  parseOptionalTabFlag,
-  resolveSession,
-  resolveTabId,
-} from './support.js';
+import { resolveManagedCurrentTab } from './support.js';
 
 import type { BrowserService, CliCommandResult } from '../types.js';
 
@@ -36,24 +31,25 @@ export async function runUploadCommand(
 }
 
 async function runUploadFilesCommand(
-  rawArgs: string[],
+  args: string[],
   options: UploadCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'upload files');
   const [selector, ...paths] = args;
 
   if (!selector || paths.length === 0) {
-    throw new Error(
-      'Usage: chrome-controller upload files <selector> <path...> [--tab <id>]'
-    );
+    throw new Error('Usage: chrome-controller upload files <selector> <path...>');
   }
 
-  const session = await resolveSession(
+  const { session, tab } = await resolveManagedCurrentTab(
     options.sessionStore,
     options.browserService,
     options.explicitSessionId
   );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  if (typeof tab.id !== 'number') {
+    throw new Error('Could not resolve the current tab for upload files');
+  }
+
+  const tabId = tab.id;
   const result = await options.browserService.uploadFiles(session, tabId, selector, paths);
 
   return {
@@ -70,10 +66,10 @@ function createUploadHelpLines(): string[] {
   return [
     'Upload commands',
     '',
-    'Usage:',
-    '  chrome-controller upload files <selector> <path...> [--tab <id>]',
+    "All upload commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab upload commands operate on.',
     '',
-    'Notes:',
-    ...createImplicitTabResolutionHelpLines(),
+    'Usage:',
+    '  chrome-controller upload files <selector> <path...>',
   ];
 }

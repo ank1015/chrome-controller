@@ -4,92 +4,65 @@ This page explains how to inspect what the browser is doing while a task runs.
 
 Use these commands when you need to:
 
-- attach the debugger
 - send raw Chrome DevTools Protocol commands
-- inspect debugger events
+- call raw browser APIs through the bridge
 - read console output
 - capture network traffic
 - take screenshots and PDFs
 
-## Debugger commands
+## Raw commands
 
-The debugger gives you raw access to Chrome DevTools Protocol domains like `Page`, `Network`, `Runtime`, `DOM`, and more.
+`raw` is the explicit advanced escape hatch.
 
-Use debugger commands when:
+Use it when the opinionated CLI surface does not expose the browser or CDP capability you need.
 
-- you need a feature that does not have a dedicated CLI command yet
-- you want to inspect low-level CDP events
-- you want to enable protocol domains directly
+### `raw browser <method> [argsJson]`
 
-### `debugger attach [--tab <id>]`
+Call any browser/bridge method directly.
 
-Attach the debugger to a tab.
+Notes:
 
-Example:
-
-```bash
-chrome-controller debugger attach
-chrome-controller debugger attach --tab 456
-```
-
-### `debugger detach [--tab <id>]`
-
-Detach the debugger from a tab.
-
-Example:
-
-```bash
-chrome-controller debugger detach
-```
-
-### `debugger cmd <method> [--params-json <json>] [--tab <id>]`
-
-Send a raw CDP command.
-
-Options:
-
-- `--params-json <json>`: JSON object of method parameters
+- `argsJson` is optional
+- if `argsJson` is a JSON array, its values are passed as positional arguments
+- if `argsJson` is any other JSON value, it is passed as one argument
 
 Examples:
 
 ```bash
-chrome-controller debugger cmd Runtime.enable
-chrome-controller debugger cmd Network.enable --params-json '{}'
-chrome-controller debugger cmd Page.navigate --params-json '{"url":"https://example.com"}'
+chrome-controller raw browser windows.getAll '[{"populate":true}]'
+chrome-controller raw browser tabs.query '[{"active":true}]'
 ```
 
-### `debugger events [--filter <prefix>] [--limit <n>] [--clear] [--tab <id>]`
+### `raw cdp <method> [paramsJson]`
 
-Read stored debugger events.
+Send any CDP command to the active session tab.
 
-Options:
+Notes:
 
-- `--filter <prefix>`: only include events whose method starts with a prefix like `Network.` or `Runtime.`
-- `--limit <n>`: return only the most recent `n` events
-- `--clear`: clear the returned events after reading
+- the command auto-attaches the debugger for the call if needed
+- it detaches afterwards if it attached the debugger itself
+- `paramsJson` must be a JSON object when provided
 
 Examples:
 
 ```bash
-chrome-controller debugger events --json
-chrome-controller debugger events --filter Network. --limit 20 --json
-chrome-controller debugger events --filter Runtime. --clear --json
+chrome-controller raw cdp Runtime.evaluate '{"expression":"document.title","returnByValue":true}'
+chrome-controller raw cdp Page.captureScreenshot '{}'
 ```
 
-### `debugger clear-events [--filter <prefix>] [--tab <id>]`
+## Observe commands
 
-Clear stored debugger events.
+Use `observe` as the preferred top-level surface for runtime signals:
 
-Examples:
-
-```bash
-chrome-controller debugger clear-events
-chrome-controller debugger clear-events --filter Network.
-```
+- `chrome-controller observe console ...`
+- `chrome-controller observe network ...`
+- `chrome-controller observe downloads ...`
 
 ## Console commands
 
 Console commands read console entries from the page.
+
+They act on the active session's current tab.
 
 Use them when:
 
@@ -97,7 +70,7 @@ Use them when:
 - you want `console.log` output from the app
 - you want to tail logs while interacting with a page
 
-### `console list [--limit <n>] [--clear] [--tab <id>]`
+### `observe console list [--limit <n>] [--clear]`
 
 Read console entries.
 
@@ -109,12 +82,12 @@ Options:
 Examples:
 
 ```bash
-chrome-controller console list
-chrome-controller console list --limit 100 --json
-chrome-controller console list --clear --json
+chrome-controller observe console list
+chrome-controller observe console list --limit 100 --json
+chrome-controller observe console list --clear --json
 ```
 
-### `console tail [--limit <n>] [--timeout-ms <n>] [--poll-ms <n>] [--tab <id>]`
+### `observe console tail [--limit <n>] [--timeout-ms <n>] [--poll-ms <n>]`
 
 Wait for new console entries.
 
@@ -132,22 +105,24 @@ Options:
 Example:
 
 ```bash
-chrome-controller console tail --timeout-ms 15000 --json
+chrome-controller observe console tail --timeout-ms 15000 --json
 ```
 
-### `console clear [--tab <id>]`
+### `observe console clear`
 
 Clear stored console entries.
 
 Example:
 
 ```bash
-chrome-controller console clear
+chrome-controller observe console clear
 ```
 
 ## Network commands
 
 Use network commands to inspect requests and responses.
+
+They act on the active session's current tab.
 
 Typical workflow:
 
@@ -156,7 +131,7 @@ Typical workflow:
 3. read a summary or request list
 4. fetch one request or export HAR
 
-### `network start [--no-clear] [--disable-cache] [--tab <id>]`
+### `observe network start [--no-clear] [--disable-cache]`
 
 Start capturing network traffic.
 
@@ -168,20 +143,20 @@ Options:
 Example:
 
 ```bash
-chrome-controller network start --disable-cache
+chrome-controller observe network start --disable-cache
 ```
 
-### `network stop [--tab <id>]`
+### `observe network stop`
 
 Stop network capture for the tab.
 
 Example:
 
 ```bash
-chrome-controller network stop
+chrome-controller observe network stop
 ```
 
-### `network list [--limit <n>] [--url-includes <text>] [--status <code>] [--failed] [--tab <id>]`
+### `observe network list [--limit <n>] [--url-includes <text>] [--status <code>] [--failed]`
 
 List captured requests.
 
@@ -195,12 +170,12 @@ Options:
 Examples:
 
 ```bash
-chrome-controller network list --json
-chrome-controller network list --failed --json
-chrome-controller network list --url-includes /api/ --status 500 --json
+chrome-controller observe network list --json
+chrome-controller observe network list --failed --json
+chrome-controller observe network list --url-includes /api/ --status 500 --json
 ```
 
-### `network get <requestId> [--tab <id>]`
+### `observe network get <requestId>`
 
 Return full details for one request.
 
@@ -211,95 +186,95 @@ Important:
 - this is a raw, forensic view of the captured debugger events for one request
 - it can be large and noisy
 - it is better for deep inspection than for quick summaries
-- if you only need a high-level view, start with `network summary` or `network list`
+- if you only need a high-level view, start with `observe network summary` or `observe network list`
 - sensitive values are redacted by default, but the payload is still intentionally low-level
 
 Example:
 
 ```bash
-chrome-controller network get req-123 --json
+chrome-controller observe network get req-123 --json
 ```
 
-### `network summary [--tab <id>]`
+### `observe network summary`
 
 Return an aggregate summary of captured traffic.
 
 Example:
 
 ```bash
-chrome-controller network summary --json
+chrome-controller observe network summary --json
 ```
 
-### `network clear [--tab <id>]`
+### `observe network clear`
 
 Clear stored network events.
 
 Example:
 
 ```bash
-chrome-controller network clear
+chrome-controller observe network clear
 ```
 
-### `network export-har <path> [--tab <id>]`
+### `observe network export-har <path>`
 
 Export captured traffic as HAR.
 
 Example:
 
 ```bash
-chrome-controller network export-har ./capture.har
+chrome-controller observe network export-har ./capture.har
 ```
 
-### `network block <pattern...> [--tab <id>]`
+### `observe network block <pattern...>`
 
 Block one or more URL patterns.
 
 Examples:
 
 ```bash
-chrome-controller network block '*://*.doubleclick.net/*'
-chrome-controller network block '*://*.ads.com/*' '*://tracker.example/*'
+chrome-controller observe network block '*://*.doubleclick.net/*'
+chrome-controller observe network block '*://*.ads.com/*' '*://tracker.example/*'
 ```
 
-### `network unblock [--tab <id>]`
+### `observe network unblock`
 
 Clear network blocking rules.
 
 Example:
 
 ```bash
-chrome-controller network unblock
+chrome-controller observe network unblock
 ```
 
-### `network offline <on|off> [--tab <id>]`
+### `observe network offline <on|off>`
 
 Toggle offline mode.
 
 Examples:
 
 ```bash
-chrome-controller network offline on
-chrome-controller network offline off
+chrome-controller observe network offline on
+chrome-controller observe network offline off
 ```
 
-### `network throttle <slow-3g|fast-3g|slow-4g|off> [--tab <id>]`
+### `observe network throttle <slow-3g|fast-3g|slow-4g|off>`
 
 Apply a built-in network throttling profile.
 
 Examples:
 
 ```bash
-chrome-controller network throttle slow-3g
-chrome-controller network throttle off
+chrome-controller observe network throttle slow-3g
+chrome-controller observe network throttle off
 ```
 
-## Screenshot command
+## Screenshot capture
 
-Use screenshots when you need visual confirmation or an artifact to inspect later.
+Use `page screenshot` when you need visual confirmation or an artifact to inspect later.
 
-### `screenshot take [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page] [--tab <id>]`
+### `page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]`
 
-Capture the current tab.
+Capture the active session tab.
 
 Options:
 
@@ -312,15 +287,14 @@ Notes:
 
 - if `path` is omitted, the screenshot is saved under `CHROME_CONTROLLER_HOME/artifacts/screenshots`
 - `--quality` only matters for JPEG
-- `page screenshot` provides the same capture flow from the page command group
 
 Examples:
 
 ```bash
-chrome-controller screenshot take
-chrome-controller screenshot take ./page.png
-chrome-controller screenshot take ./page.jpg --format jpeg --quality 85
-chrome-controller screenshot take ./full.png --full-page
+chrome-controller page screenshot
+chrome-controller page screenshot ./page.png
+chrome-controller page screenshot ./page.jpg --format jpeg --quality 85
+chrome-controller page screenshot ./full.png --full-page
 ```
 
 ## PDF capture
@@ -339,31 +313,30 @@ chrome-controller page pdf ./report.pdf --format a4 --background
 ### Find a failing XHR
 
 ```bash
-chrome-controller network start --disable-cache
+chrome-controller observe network start --disable-cache
 chrome-controller page goto https://example.com
 chrome-controller wait load
-chrome-controller network list --failed --json
+chrome-controller observe network list --failed --json
 ```
 
 ### Read recent browser warnings
 
 ```bash
-chrome-controller console list --limit 100 --json
+chrome-controller observe console list --limit 100 --json
 ```
 
 ### Inspect a page with raw CDP
 
 ```bash
-chrome-controller debugger attach
-chrome-controller debugger cmd DOM.enable
-chrome-controller debugger events --limit 50 --json
+chrome-controller raw cdp DOM.getDocument '{"depth":1,"pierce":false}' --json
+chrome-controller raw cdp Runtime.evaluate '{"expression":"document.title","returnByValue":true}' --json
 ```
 
 ### Capture a reproducible artifact bundle
 
 ```bash
-chrome-controller screenshot take ./page.png
+chrome-controller page screenshot ./page.png
 chrome-controller page pdf ./page.pdf
-chrome-controller network export-har ./page.har
-chrome-controller console list --json
+chrome-controller observe network export-har ./page.har
+chrome-controller observe console list --json
 ```
