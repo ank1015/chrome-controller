@@ -89,7 +89,8 @@ Use this to inspect requests triggered by one action.
 
 ```bash
 chrome-controller network start --disable-cache --tab 456
-chrome-controller element click @e8 --tab 456
+chrome-controller tabs use 456
+chrome-controller element click @e8
 chrome-controller wait idle 1500
 chrome-controller network summary --tab 456 --json
 chrome-controller network list --tab 456 --json
@@ -124,7 +125,8 @@ If the upload button is hidden behind a custom control:
 Use this when a page action should create a download.
 
 ```bash
-chrome-controller element click @e8 --tab 456
+chrome-controller tabs use 456
+chrome-controller element click @e8
 chrome-controller wait download --filename-includes report --timeout-ms 20000 --json
 chrome-controller downloads list --state complete --json
 ```

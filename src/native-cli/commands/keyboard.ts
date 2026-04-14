@@ -80,21 +80,22 @@ async function runKeyboardPressCommand(
   );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
-  await options.browserService.activateTab(session, tabId);
-  await withAttachedDebugger(options.browserService, session, tabId, async () => {
-    for (let index = 0; index < parsed.count; index += 1) {
-      await sendKeyPress(options.browserService, session, tabId, parsed.key);
-    }
-  });
+  const outcome = await pressKeyOnTab(
+    options.browserService,
+    session,
+    tabId,
+    parsed.key.key,
+    parsed.count
+  );
 
   return {
     session,
     data: {
       tabId,
-      key: parsed.key.key,
-      count: parsed.count,
+      key: outcome.key,
+      count: outcome.count,
     },
-    lines: [`Pressed ${parsed.key.key}${parsed.count === 1 ? '' : ` x${parsed.count}`}`],
+    lines: [`Pressed ${outcome.key}${outcome.count === 1 ? '' : ` x${outcome.count}`}`],
   };
 }
 
@@ -290,6 +291,29 @@ async function sendKeyPress(
     windowsVirtualKeyCode: key.keyCode,
     nativeVirtualKeyCode: key.keyCode,
   });
+}
+
+export async function pressKeyOnTab(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  tabId: number,
+  rawKeyName: string,
+  count = 1
+): Promise<{ key: string; count: number }> {
+  const key = normalizeKeyDefinition(rawKeyName);
+  const safeCount = Math.max(1, count);
+
+  await browserService.activateTab(session, tabId);
+  await withAttachedDebugger(browserService, session, tabId, async () => {
+    for (let index = 0; index < safeCount; index += 1) {
+      await sendKeyPress(browserService, session, tabId, key);
+    }
+  });
+
+  return {
+    key: key.key,
+    count: safeCount,
+  };
 }
 
 function normalizeKeyDefinition(rawValue: string): KeyDefinition {

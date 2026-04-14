@@ -1,6 +1,11 @@
 import { SessionStore } from '../session-store.js';
 
-import type { BrowserService, CliSessionRecord, CliWindowInfo } from '../types.js';
+import type {
+  BrowserService,
+  CliSessionRecord,
+  CliTabInfo,
+  CliWindowInfo,
+} from '../types.js';
 
 export async function resolveSession(
   sessionStore: SessionStore,
@@ -126,6 +131,60 @@ export async function resolveTab(
     url: activeTab.url,
     title: activeTab.title,
   };
+}
+
+export async function resolveManagedCurrentTab(
+  sessionStore: SessionStore,
+  browserService: BrowserService,
+  explicitSessionId?: string
+): Promise<{ session: CliSessionRecord; tab: CliTabInfo }> {
+  let session = await resolveSession(sessionStore, browserService, explicitSessionId);
+  const tabs = await browserService.listTabs(session, {
+    windowId: requireManagedWindowId(session),
+  });
+  const tab = selectCurrentManagedTab(session, tabs);
+
+  if (!tab || typeof tab.id !== 'number') {
+    if (session.targetTabId !== null) {
+      session = await sessionStore.clearTargetTab(session.id);
+    }
+
+    throw new Error(
+      `Managed window ${session.windowId ?? 'unknown'} has no tabs. Run \`chrome-controller tabs new\`.`
+    );
+  }
+
+  if (session.targetTabId !== tab.id) {
+    session = await sessionStore.setTargetTab(session.id, tab.id);
+  }
+
+  return {
+    session,
+    tab,
+  };
+}
+
+export function selectCurrentManagedTab(
+  session: CliSessionRecord,
+  tabs: CliTabInfo[]
+): CliTabInfo | null {
+  const currentTab =
+    typeof session.targetTabId === 'number'
+      ? tabs.find((tab) => tab.id === session.targetTabId) ?? null
+      : null;
+  if (currentTab) {
+    return currentTab;
+  }
+
+  return tabs.find((tab) => tab.active) ?? tabs[0] ?? null;
+}
+
+export function requireManagedWindowId(session: CliSessionRecord): number {
+  if (typeof session.windowId !== 'number') {
+    throw new Error(`Could not resolve a managed window for session ${session.id}`);
+  }
+
+  return session.windowId;
 }
 
 export function createImplicitTabResolutionHelpLines(): string[] {

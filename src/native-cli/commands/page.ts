@@ -11,21 +11,18 @@ import {
 import { createPageMarkdown } from '../page-markdown.js';
 import { getChromeControllerHome, SessionStore } from '../session-store.js';
 import { sleep } from '../interaction-support.js';
+import { runFindCommand } from './find.js';
 import {
   captureScreenshotForTab,
   parseScreenshotOptions,
 } from './screenshot.js';
 
-import {
-  resolveSession,
-} from './support.js';
+import { resolveManagedCurrentTab, resolveSession } from './support.js';
 
 import type {
   BrowserService,
   CliCommandResult,
   CliRunOptions,
-  CliSessionRecord,
-  CliTabInfo,
 } from '../types.js';
 
 interface PageCommandOptions {
@@ -52,6 +49,11 @@ export async function runPageCommand(
       return await runPageTextCommand(rest, options);
     case 'snapshot':
       return await runPageSnapshotCommand(rest, options);
+    case 'find':
+      return await runFindCommand({
+        ...options,
+        args: rest,
+      });
     case 'eval':
       return await runPageEvalCommand(rest, options);
     case 'pdf':
@@ -555,6 +557,7 @@ function createPageHelpLines(): string[] {
     '  chrome-controller page title',
     '  chrome-controller page text',
     '  chrome-controller page snapshot',
+    '  chrome-controller page find <query> [--limit <n>]',
     '  chrome-controller page eval <code> [--await-promise] [--user-gesture]',
     '  chrome-controller page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size]',
     '  chrome-controller page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]',
@@ -569,61 +572,15 @@ function createPageHelpLines(): string[] {
 
 async function resolvePageTab(
   options: PageCommandOptions
-): Promise<{ session: CliSessionRecord; tab: CliTabInfo }> {
-  let session = await resolveSession(
+): Promise<Awaited<ReturnType<typeof resolveManagedCurrentTab>>> {
+  return await resolveManagedCurrentTab(
     options.sessionStore,
     options.browserService,
     options.explicitSessionId
   );
-  const tabs = await options.browserService.listTabs(session, {
-    windowId: requireManagedWindowId(session),
-  });
-  const tab = selectCurrentPageTab(session, tabs);
-
-  if (!tab || typeof tab.id !== 'number') {
-    if (session.targetTabId !== null) {
-      session = await options.sessionStore.clearTargetTab(session.id);
-    }
-
-    throw new Error(
-      `Managed window ${session.windowId ?? 'unknown'} has no tabs. Run \`chrome-controller tabs new\`.`
-    );
-  }
-
-  if (session.targetTabId !== tab.id) {
-    session = await options.sessionStore.setTargetTab(session.id, tab.id);
-  }
-
-  return {
-    session,
-    tab,
-  };
 }
 
-function selectCurrentPageTab(
-  session: CliSessionRecord,
-  tabs: CliTabInfo[]
-): CliTabInfo | null {
-  const currentTab =
-    typeof session.targetTabId === 'number'
-      ? tabs.find((tab) => tab.id === session.targetTabId) ?? null
-      : null;
-  if (currentTab) {
-    return currentTab;
-  }
-
-  return tabs.find((tab) => tab.active) ?? tabs[0] ?? null;
-}
-
-function requireManagedWindowId(session: CliSessionRecord): number {
-  if (typeof session.windowId !== 'number') {
-    throw new Error(`Could not resolve a managed window for session ${session.id}`);
-  }
-
-  return session.windowId;
-}
-
-function requireTabId(tab: CliTabInfo, commandName: string): number {
+function requireTabId(tab: { id: number | null }, commandName: string): number {
   if (typeof tab.id !== 'number') {
     throw new Error(`Could not resolve a tab id for page ${commandName}`);
   }

@@ -180,7 +180,7 @@ For most tasks, the best loop is:
 1. use `open --ready` to open the page or reuse an already-open exact URL match and remember it as the session's current tab
 2. verify the tab with `page url` or `page title`
 3. navigate if needed
-4. run `find` when you want a semantic shortlist first
+4. run `page find` when you want a semantic shortlist first
 5. run `page snapshot` when you want the raw interactive structure
 6. act on `@eN` refs with `element ...`
 7. wait for the page to settle with `wait ...`
@@ -203,7 +203,7 @@ chrome-controller page snapshot
 Fast loop when you are already sure about the target tab:
 
 1. navigate to the page
-2. run `find` if you want likely candidates instead of the whole page
+2. run `page find` if you want likely candidates instead of the whole page
 3. run `page snapshot`
 4. act on `@eN` refs with `element ...`
 5. wait for the page to settle with `wait ...`
@@ -281,7 +281,7 @@ Then feed the returned center or edges into `mouse move`, `mouse click`, or `mou
 ```bash
 chrome-controller open https://example.com --ready --json
 chrome-controller page title
-chrome-controller find "main heading and primary action"
+chrome-controller page find "main heading and primary action"
 chrome-controller page text
 chrome-controller page snapshot
 ```
@@ -289,7 +289,7 @@ chrome-controller page snapshot
 ### Narrow a large page before clicking
 
 ```bash
-chrome-controller find "search box and search button" --limit 20
+chrome-controller page find "search box and search button" --limit 20
 chrome-controller element click @e5
 ```
 

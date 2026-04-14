@@ -93,6 +93,27 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     return { ...tab };
   }
 
+  async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
+    this.calls.push({
+      method: 'activateTab',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
+    for (const candidate of this.tabs.values()) {
+      if (candidate.windowId === tab.windowId) {
+        candidate.active = candidate.id === tabId;
+      }
+    }
+
+    return { ...tab, active: true };
+  }
+
   async evaluateTab(
     session: CliSessionRecord,
     tabId: number,
@@ -276,9 +297,19 @@ describe('native CLI find command', () => {
     ]);
   });
 
-  it('supports explicit tab selection and forwards the requested result limit', async () => {
+  it('supports page find and follows the session current tab', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    await runCliCommand(
+      ['tabs', 'use', '102', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    browserService.calls.length = 0;
+
     const outcome = await runCliCommand(
-      ['find', 'email field', '--tab', '102', '--limit', '30', '--json'],
+      ['page', 'find', 'email field', '--limit', '30', '--session', 'alpha', '--json'],
       tempHome,
       browserService,
       now
@@ -290,10 +321,12 @@ describe('native CLI find command', () => {
     expect(payload.data.query).toBe('email field');
     expect(payload.data.limit).toBe(30);
     expect(payload.data.resultMarkdown).toContain('## Relevant elements');
-    expect(browserService.calls[1]).toEqual({
-      method: 'getTab',
-      sessionId: 's1',
-      payload: 102,
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow')[0]).toEqual({
+      method: 'listTabs',
+      sessionId: 'alpha',
+      payload: {
+        windowId: 11,
+      },
     });
     expect(
       browserService.calls.filter((call) => call.method === 'evaluateTab').every((call) =>

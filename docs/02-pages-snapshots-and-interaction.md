@@ -68,7 +68,7 @@ Practical rules:
 For most browser tasks, use this loop:
 
 1. use `open --ready` to pin the working tab, or pin an existing tab first
-2. run `find` when you need semantic narrowing or a fuzzy shortlist
+2. run `page find` when you need semantic narrowing or a fuzzy shortlist
 3. run `page snapshot` when you want the raw interactive structure
 4. interact with `element ...`
 5. use `wait ...` to confirm the next state
@@ -86,18 +86,19 @@ chrome-controller wait stable
 chrome-controller page snapshot
 ```
 
-## Semantic discovery with `find`
+## Semantic discovery with `page find`
 
-### `find <query> [--limit <n>] [--tab <id>]`
+### `page find <query> [--limit <n>]`
 
-Use `find` when you know what you want in natural language, but do not know the exact selector or exact `@eN` yet.
+Use `page find` when you know what you want in natural language, but do not know the exact selector or exact `@eN` yet.
 
 Examples:
 
 ```bash
-chrome-controller find "search box and search button"
-chrome-controller find "repository heading and star button" --tab 456
-chrome-controller find "the first story link and the comments link for that story" --limit 20 --json
+chrome-controller page find "search box and search button"
+chrome-controller tabs use 456
+chrome-controller page find "repository heading and star button"
+chrome-controller page find "the first story link and the comments link for that story" --limit 20 --json
 ```
 
 What it does:
@@ -109,7 +110,7 @@ What it does:
 
 Important mental model:
 
-- `find` does **not** promise the exact answer
+- `page find` does **not** promise the exact answer
 - it is a narrowing command, not a final decision command
 - it intentionally returns a list of plausible candidates
 - noisy results are acceptable if the right answer is present
@@ -140,15 +141,16 @@ How to use the results:
 - treat the first few results as the best guesses
 - if one of the returned `@eN` refs is clearly right, use it directly in `element ...`
 - if the list is still ambiguous, run `page snapshot` or `element text/html/attr` on the candidates
-- if the page changed after `find`, rerun `find` or `page snapshot` before acting
+- if the page changed after `page find`, rerun `page find` or `page snapshot` before acting
 
 Notes:
 
-- returned `@eN` refs come from the latest snapshot captured during `find`
+- returned `@eN` refs come from the latest snapshot captured during `page find`
 - the command may split one query into multiple target sections
 - `--limit` is a maximum, not a guarantee of exact coverage
 - the command prefers over-inclusion to under-inclusion
 - `--json` includes both the generated page-model markdown and the LLM-ranked markdown result, which is useful for debugging
+- top-level `find` remains as a compatibility alias, but `page find` is the primary command shape
 
 ## Page commands
 
@@ -323,58 +325,22 @@ chrome-controller page screenshot ./full.webp --format webp --full-page
 
 ## Element commands
 
-Element commands accept either:
+Element commands always act on the active session's current tab.
+
+Use `tabs use <tabId>` first when you want element commands to operate on a different tab in the managed window.
+
+Targets can be:
 
 - a CSS selector
 - a snapshot ref like `@e1`
 
 Use snapshot refs when possible.
 
-### Action commands
+### `element click <selector|@ref>`
 
-### `element click <selector|@ref> [--tab <id>]`
+Click the target element.
 
-Normal click.
-
-### `element dblclick <selector|@ref> [--tab <id>]`
-
-Double click.
-
-### `element rightclick <selector|@ref> [--tab <id>]`
-
-Context click.
-
-### `element hover <selector|@ref> [--tab <id>]`
-
-Move pointer over an element.
-
-Useful for:
-
-- menus
-- tooltips
-- hover-revealed controls
-
-### `element focus <selector|@ref> [--tab <id>]`
-
-Focus an element without typing into it yet.
-
-### `element scroll-into-view <selector|@ref> [--tab <id>]`
-
-Scroll the target into view.
-
-Examples:
-
-```bash
-chrome-controller element click @e3
-chrome-controller element dblclick '#row-4'
-chrome-controller element hover @e9
-chrome-controller element focus 'input[name="email"]'
-chrome-controller element scroll-into-view @e15
-```
-
-### Value and form commands
-
-### `element fill <selector|@ref> <value> [--tab <id>]`
+### `element fill <selector|@ref> <value>`
 
 Replace the current value with `<value>`.
 
@@ -384,7 +350,7 @@ Best for:
 - textareas
 - content-editable fields
 
-### `element type <selector|@ref> <value> [--delay-ms <n>] [--tab <id>]`
+### `element type <selector|@ref> <value> [--delay-ms <n>]`
 
 Type text into the target gradually.
 
@@ -392,11 +358,17 @@ Options:
 
 - `--delay-ms <n>`: delay between characters
 
-### `element clear <selector|@ref> [--tab <id>]`
+### `element press <selector|@ref> <key> [--count <n>]`
 
-Clear an input or editable target.
+Focus the element, then send one or more key presses to the tab.
 
-### `element select <selector|@ref> <value> [--tab <id>]`
+Use this for:
+
+- pressing Enter on a focused submit button
+- moving through a menu or combobox with arrow keys
+- confirming a modal action with keyboard input
+
+### `element select <selector|@ref> <value>`
 
 Select an option in a `<select>` element.
 
@@ -405,11 +377,11 @@ You can usually pass either:
 - the option value
 - the visible label
 
-### `element check <selector|@ref> [--tab <id>]`
+### `element check <selector|@ref>`
 
 Turn a checkbox or similar control on.
 
-### `element uncheck <selector|@ref> [--tab <id>]`
+### `element uncheck <selector|@ref>`
 
 Turn a checkbox or similar control off.
 
@@ -417,57 +389,12 @@ Examples:
 
 ```bash
 chrome-controller element fill @e1 "alice@example.com"
-chrome-controller element type @e2 "hello world" --delay-ms 25
-chrome-controller element clear '#search'
-chrome-controller element select '@e4' "United States"
-chrome-controller element check '@e9'
+chrome-controller element type @e1 "hello world" --delay-ms 25
+chrome-controller element click @e2
+chrome-controller element press @e2 Enter
+chrome-controller element select @e4 "United States"
+chrome-controller element check @e3
 ```
-
-### Read commands
-
-Use these when you need information about one element.
-
-### `element text <selector|@ref> [--tab <id>]`
-
-Return the visible text content.
-
-### `element html <selector|@ref> [--tab <id>]`
-
-Return the element HTML.
-
-### `element attr <selector|@ref> <name> [--tab <id>]`
-
-Return one attribute value.
-
-### `element value <selector|@ref> [--tab <id>]`
-
-Return the current form value.
-
-### `element visible <selector|@ref> [--tab <id>]`
-
-Return whether the element is visible.
-
-### `element enabled <selector|@ref> [--tab <id>]`
-
-Return whether the element is enabled.
-
-### `element checked <selector|@ref> [--tab <id>]`
-
-Return whether the target is checked.
-
-### `element box <selector|@ref> [--tab <id>]`
-
-Return the live element bounding box.
-
-Use this before mouse commands when you need coordinates.
-
-Example:
-
-```bash
-chrome-controller element box @e12 --json
-```
-
-The JSON result includes positions such as:
 
 - `left`
 - `top`

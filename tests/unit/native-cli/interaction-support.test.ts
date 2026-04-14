@@ -87,6 +87,7 @@ class FakeElement {
 
   click() {
     this.clicks += 1;
+    this.events.push({ type: 'click' });
   }
 
   dispatchEvent(event: { type: string }) {
@@ -202,6 +203,7 @@ describe('native CLI interaction support DOM runtime', () => {
 
     expect(result.matchedSelector).toBe('#target');
     expect(target.clicks).toBe(1);
+    expect(target.events.filter((event) => event.type === 'click')).toHaveLength(1);
     expect(wrongA.clicks).toBe(0);
     expect(wrongB.clicks).toBe(0);
   });

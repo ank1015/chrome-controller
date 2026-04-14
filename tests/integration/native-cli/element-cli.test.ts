@@ -56,8 +56,8 @@ function createSnapshotRecord(sessionId: string, tabId: number): CliPageSnapshot
     tabId,
     title: 'Example Login',
     url: 'https://example.com/login',
-    count: 2,
-    visibleCount: 2,
+    count: 4,
+    visibleCount: 4,
     truncated: false,
     elements: [
       {
@@ -84,12 +84,35 @@ function createSnapshotRecord(sessionId: string, tabId: number): CliPageSnapshot
         disabled: false,
         checked: null,
       },
+      {
+        ref: '@e3',
+        role: 'checkbox',
+        name: 'Remember me',
+        tagName: 'input',
+        inputType: 'checkbox',
+        selector: '#remember',
+        alternativeSelectors: ['input[name="remember"]'],
+        placeholder: null,
+        disabled: false,
+        checked: false,
+      },
+      {
+        ref: '@e4',
+        role: 'combobox',
+        name: 'Role',
+        tagName: 'select',
+        inputType: null,
+        selector: '#role',
+        alternativeSelectors: ['select[name="role"]'],
+        placeholder: null,
+        disabled: false,
+        checked: null,
+      },
     ],
   };
 }
 
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
-  attrDetachedFailuresRemaining = 0;
   clickDetachedFailuresRemaining = 0;
 
   async listTabs(session: CliSessionRecord): Promise<CliTabInfo[]> {
@@ -97,17 +120,31 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       method: 'listTabs',
       sessionId: session.id,
       payload: {
-        currentWindow: true,
+        windowId: 11,
       },
     });
 
     return [createTab()];
   }
 
+  async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
+    this.calls.push({
+      method: 'activateTab',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    return createTab({ id: tabId, active: true });
+  }
+
   async evaluateTab(
     session: CliSessionRecord,
     tabId: number,
-    code: string
+    code: string,
+    options: {
+      awaitPromise?: boolean;
+      userGesture?: boolean;
+    } = {}
   ): Promise<unknown> {
     const request = extractDomRequest(code);
     this.calls.push({
@@ -116,6 +153,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: {
         tabId,
         request,
+        options,
       },
     });
 
@@ -139,33 +177,88 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       };
     }
 
-    if (request.operation === 'box') {
+    if (request.operation === 'type') {
       return {
+        ok: true,
         matchedSelector: '#email',
-        box: {
-          left: 24,
-          top: 120,
-          width: 280,
-          height: 40,
-          centerX: 164,
-          centerY: 140,
-        },
+        value: request.value,
       };
     }
 
-    if (request.operation === 'attr') {
-      if (this.attrDetachedFailuresRemaining > 0) {
-        this.attrDetachedFailuresRemaining -= 1;
-        throw new Error('Detached while handling command.');
-      }
-
+    if (request.operation === 'select') {
       return {
-        matchedSelector: '#email',
-        value: request.attribute === 'placeholder' ? 'Email' : null,
+        ok: true,
+        matchedSelector: '#role',
+        value: request.value,
+      };
+    }
+
+    if (request.operation === 'check' || request.operation === 'uncheck') {
+      return {
+        ok: true,
+        matchedSelector: '#remember',
+        checked: request.operation === 'check',
+      };
+    }
+
+    if (request.operation === 'focus') {
+      return {
+        ok: true,
+        matchedSelector: 'button[type="submit"]',
       };
     }
 
     throw new Error(`Unexpected DOM operation: ${String(request.operation)}`);
+  }
+
+  async attachDebugger(
+    session: CliSessionRecord,
+    tabId: number
+  ): Promise<{ attached: boolean; alreadyAttached: boolean }> {
+    this.calls.push({
+      method: 'attachDebugger',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    return {
+      attached: true,
+      alreadyAttached: false,
+    };
+  }
+
+  async sendDebuggerCommand(
+    session: CliSessionRecord,
+    tabId: number,
+    method: string,
+    params?: Record<string, unknown>
+  ): Promise<unknown> {
+    this.calls.push({
+      method: 'sendDebuggerCommand',
+      sessionId: session.id,
+      payload: {
+        tabId,
+        method,
+        params: params ?? null,
+      },
+    });
+
+    return {};
+  }
+
+  async detachDebugger(
+    session: CliSessionRecord,
+    tabId: number
+  ): Promise<{ detached: boolean }> {
+    this.calls.push({
+      method: 'detachDebugger',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    return {
+      detached: true,
+    };
   }
 }
 
@@ -242,7 +335,7 @@ describe('native CLI element commands', () => {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {
@@ -250,6 +343,9 @@ describe('native CLI element commands', () => {
         sessionId: 's1',
         payload: expect.objectContaining({
           tabId: 101,
+          options: {
+            userGesture: true,
+          },
           request: expect.objectContaining({
             selectors: ['button[type="submit"]'],
             operation: 'click',
@@ -284,9 +380,9 @@ describe('native CLI element commands', () => {
     });
   });
 
-  it('reads a live element box for later mouse commands', async () => {
+  it('types into a cached textbox ref and returns the resolved value', async () => {
     const outcome = await runCliCommand(
-      ['element', 'box', '@e1', '--json'],
+      ['element', 'type', '@e1', 'hello world', '--delay-ms', '12', '--json'],
       tempHome,
       browserService,
       now
@@ -294,22 +390,14 @@ describe('native CLI element commands', () => {
     const payload = JSON.parse(outcome.stdout);
 
     expect(outcome.exitCode).toBe(0);
-    expect(payload.data.value).toEqual({
-      left: 24,
-      top: 120,
-      width: 280,
-      height: 40,
-      centerX: 164,
-      centerY: 140,
-    });
+    expect(payload.data.value).toBe('hello world');
+    expect(payload.data.delayMs).toBe(12);
     expect(payload.data.matchedSelector).toBe('#email');
   });
 
-  it('retries element attr once when the page detaches during evaluation', async () => {
-    browserService.attrDetachedFailuresRemaining = 1;
-
+  it('selects an option in a select control', async () => {
     const outcome = await runCliCommand(
-      ['element', 'attr', '@e1', 'placeholder', '--json'],
+      ['element', 'select', '@e4', 'admin', '--json'],
       tempHome,
       browserService,
       now
@@ -319,18 +407,57 @@ describe('native CLI element commands', () => {
     expect(outcome.exitCode).toBe(0);
     expect(payload.data).toEqual({
       tabId: 101,
-      target: '@e1',
-      matchedSelector: '#email',
-      attribute: 'placeholder',
-      value: 'Email',
+      target: '@e4',
+      matchedSelector: '#role',
+      value: 'admin',
       result: {
-        matchedSelector: '#email',
-        value: 'Email',
+        ok: true,
+        matchedSelector: '#role',
+        value: 'admin',
       },
     });
-    expect(
-      browserService.calls.filter((call) => call.method === 'evaluateTab')
-    ).toHaveLength(2);
+  });
+
+  it('checks and unchecks a checkbox ref', async () => {
+    const checkOutcome = await runCliCommand(
+      ['element', 'check', '@e3', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const uncheckOutcome = await runCliCommand(
+      ['element', 'uncheck', '@e3', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    expect(JSON.parse(checkOutcome.stdout).data.checked).toBe(true);
+    expect(JSON.parse(uncheckOutcome.stdout).data.checked).toBe(false);
+  });
+
+  it('focuses an element and presses a key on it', async () => {
+    const outcome = await runCliCommand(
+      ['element', 'press', '@e2', 'Enter', '--count', '2', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tabId: 101,
+      target: '@e2',
+      matchedSelector: 'button[type="submit"]',
+      key: 'Enter',
+      count: 2,
+      result: {
+        ok: true,
+        matchedSelector: 'button[type="submit"]',
+      },
+    });
+    expect(browserService.calls.filter((call) => call.method === 'sendDebuggerCommand')).toHaveLength(6);
   });
 
   it('surfaces actionable detached errors for non-retried element actions', async () => {
@@ -369,5 +496,15 @@ describe('native CLI element commands', () => {
     expect(
       browserService.calls.filter((call) => call.method === 'evaluateTab')
     ).toHaveLength(2);
+    expect(
+      browserService.calls.filter((call) => call.method === 'evaluateTab').every((call) =>
+        Boolean(
+          typeof call.payload === 'object' &&
+            call.payload !== null &&
+            'options' in call.payload &&
+            (call.payload as { options?: { userGesture?: boolean } }).options?.userGesture === true
+        )
+      )
+    ).toBe(true);
   });
 });

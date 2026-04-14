@@ -718,7 +718,32 @@ function domOperationRuntime(request: {
       };
     }
 
-    if (operation === 'click' || operation === 'dblclick' || operation === 'rightclick') {
+    if (operation === 'click') {
+      scrollIntoView(element);
+      focusElement(element);
+      const button = 0;
+      const buttons = 1;
+      const detail = 1;
+
+      dispatchMouse(element, 'mouseover', button, buttons, detail);
+      dispatchMouse(element, 'mousemove', button, buttons, detail);
+      dispatchMouse(element, 'mousedown', button, buttons, detail);
+      dispatchMouse(element, 'mouseup', button, 0, detail);
+
+      if (typeof element.click === 'function') {
+        element.click();
+      } else {
+        dispatchMouse(element, 'click', button, 0, detail);
+      }
+
+      return {
+        ok: true,
+        matchedSelector,
+        box: getBox(element),
+      };
+    }
+
+    if (operation === 'dblclick' || operation === 'rightclick') {
       scrollIntoView(element);
       focusElement(element);
       const button = operation === 'rightclick' ? 2 : 0;
@@ -731,15 +756,11 @@ function domOperationRuntime(request: {
       dispatchMouse(element, 'mouseup', button, 0, detail);
       dispatchMouse(
         element,
-        operation === 'rightclick' ? 'contextmenu' : operation === 'dblclick' ? 'dblclick' : 'click',
+        operation === 'rightclick' ? 'contextmenu' : 'dblclick',
         button,
         0,
         detail
       );
-
-      if (operation !== 'rightclick' && typeof element.click === 'function') {
-        element.click();
-      }
 
       return {
         ok: true,

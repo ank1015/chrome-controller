@@ -75,10 +75,28 @@ describe('native CLI help text', () => {
     expect(outcome.stdout).toContain(
       'Use `tabs use <tabId>` to switch which tab page commands operate on.'
     );
+    expect(outcome.stdout).toContain('chrome-controller page find <query> [--limit <n>]');
     expect(outcome.stdout).toContain('chrome-controller page screenshot');
     expect(outcome.stdout).not.toContain(
       "When --tab is omitted, the session's current tab is used first."
     );
+  });
+
+  it('describes element commands as acting on the session current tab', async () => {
+    const outcome = await runCliCommand(['element', 'help'], tempHome);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.stderr).toBe('');
+    expect(outcome.stdout).toContain(
+      "All element commands act on the active session's current tab."
+    );
+    expect(outcome.stdout).toContain(
+      'Use `tabs use <tabId>` to switch which tab element commands operate on.'
+    );
+    expect(outcome.stdout).toContain(
+      'chrome-controller element press <selector|@ref> <key> [--count <n>]'
+    );
+    expect(outcome.stdout).not.toContain('[--tab <id>]');
   });
 
   it('describes current-session-tab-first URL scoping for cookies help', async () => {
