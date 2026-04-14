@@ -9,13 +9,10 @@ import { createCapturedOutput } from '../../helpers/io.js';
 import type {
   BrowserService,
   CliCloseOtherTabsOptions,
-  CliCreateWindowOptions,
   CliListTabsOptions,
-  CliMoveTabOptions,
   CliOpenTabOptions,
   CliSessionRecord,
   CliTabInfo,
-  CliWindowInfo,
 } from '../../../src/native-cli/types.js';
 
 function createNowGenerator(): () => Date {
@@ -42,42 +39,13 @@ function createTab(overrides: Partial<CliTabInfo> = {}): CliTabInfo {
 }
 
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
-
   private readonly tabs = new Map<number, CliTabInfo>([
     [101, createTab({ id: 101, windowId: 11, active: true, title: 'Home', url: 'https://example.com' })],
     [102, createTab({ id: 102, windowId: 11, active: false, title: 'Docs', url: 'https://docs.example.com', index: 1 })],
     [201, createTab({ id: 201, windowId: 22, active: true, title: 'Other', url: 'https://other.example.com' })],
   ]);
-  private readonly delayedListVisibility = new Map<number, number>();
 
   private nextTabId = 300;
-
-  async listWindows(_session: CliSessionRecord): Promise<CliWindowInfo[]> {
-    return [];
-  }
-
-  async getCurrentWindow(_session: CliSessionRecord): Promise<CliWindowInfo> {
-    throw new Error('getCurrentWindow is not used in tabs CLI tests');
-  }
-
-  async getWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
-    return await super.getWindow(session, windowId);
-  }
-
-  async createWindow(
-    session: CliSessionRecord,
-    options?: CliCreateWindowOptions
-  ): Promise<CliWindowInfo> {
-    return await super.createWindow(session, options);
-  }
-
-  async focusWindow(_session: CliSessionRecord, _windowId: number): Promise<CliWindowInfo> {
-    throw new Error('focusWindow is not used in tabs CLI tests');
-  }
-
-  async closeWindow(session: CliSessionRecord, windowId: number): Promise<void> {
-    await super.closeWindow(session, windowId);
-  }
 
   async listTabs(
     session: CliSessionRecord,
@@ -97,9 +65,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
           ? tabs
           : tabs.filter((tab) => tab.windowId === 11);
 
-    return matchingTabs
-      .filter((tab) => this.shouldIncludeTabInList(tab.id as number))
-      .map((tab) => ({ ...tab }));
+    return matchingTabs.map((tab) => ({ ...tab }));
   }
 
   async openTab(session: CliSessionRecord, options: CliOpenTabOptions): Promise<CliTabInfo> {
@@ -109,28 +75,20 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: options,
     });
 
-    if (options.url === 'https://reuse.example.com') {
-      const reused = this.requireStoredTab(102);
-      reused.url = options.url;
-      reused.title = 'Reused existing tab';
-      reused.active = options.active ?? reused.active;
-      return this.requireTab(102);
-    }
-
     const tab = createTab({
       id: this.nextTabId++,
       windowId: options.windowId ?? 11,
       active: options.active ?? true,
       pinned: options.pinned ?? false,
-      title: 'Opened tab',
+      title: options.url === 'about:blank' ? 'New Tab' : 'Opened tab',
       url: options.url,
       index: 99,
     });
-    this.tabs.set(tab.id as number, tab);
-    if (options.url === 'https://eventual.example.com') {
-      this.delayedListVisibility.set(tab.id as number, 1);
+    if (tab.active) {
+      this.setActiveTab(tab.windowId ?? 11, tab.id as number);
     }
-    return tab;
+    this.tabs.set(tab.id as number, tab);
+    return { ...tab };
   }
 
   async getTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
@@ -140,7 +98,12 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
-    return this.requireTab(tabId);
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
+    return { ...tab };
   }
 
   async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
@@ -150,14 +113,13 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
-    const tab = this.requireTab(tabId);
-    for (const existing of this.tabs.values()) {
-      if (existing.windowId === tab.windowId) {
-        existing.active = existing.id === tab.id;
-      }
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
     }
 
-    return this.requireTab(tabId);
+    this.setActiveTab(tab.windowId ?? 11, tabId);
+    return { ...tab, active: true };
   }
 
   async closeTabs(session: CliSessionRecord, tabIds: number[]): Promise<void> {
@@ -168,7 +130,21 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     });
 
     for (const tabId of tabIds) {
+      const tab = this.tabs.get(tabId);
+      if (!tab) {
+        continue;
+      }
+
+      const closingActive = tab.active;
+      const windowId = tab.windowId ?? 11;
       this.tabs.delete(tabId);
+      if (closingActive) {
+        const remaining = [...this.tabs.values()].filter((candidate) => candidate.windowId === windowId);
+        const fallback = remaining[0];
+        if (fallback?.id !== undefined) {
+          this.setActiveTab(windowId, fallback.id);
+        }
+      }
     }
   }
 
@@ -184,22 +160,27 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
     const windowId = options.windowId ?? 11;
     const tabs = [...this.tabs.values()].filter((tab) => tab.windowId === windowId);
-    const keepTabIds =
-      options.keepTabId !== undefined
-        ? [options.keepTabId]
-        : tabs.filter((tab) => tab.active).map((tab) => tab.id as number);
-    const kept = new Set(keepTabIds);
+    const keepTabId =
+      options.keepTabId
+      ?? tabs.find((tab) => tab.active)?.id
+      ?? tabs[0]?.id
+      ?? null;
+
     const closedTabIds = tabs
-      .filter((tab) => !kept.has(tab.id as number))
+      .filter((tab) => tab.id !== keepTabId)
       .map((tab) => tab.id as number);
 
     for (const tabId of closedTabIds) {
       this.tabs.delete(tabId);
     }
 
+    if (typeof keepTabId === 'number') {
+      this.setActiveTab(windowId, keepTabId);
+    }
+
     return {
       closedTabIds,
-      keptTabIds: [...kept],
+      keptTabIds: typeof keepTabId === 'number' ? [keepTabId] : [],
     };
   }
 
@@ -210,7 +191,13 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
-    return this.requireTab(tabId);
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
+    tab.status = 'complete';
+    return { ...tab };
   }
 
   async duplicateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
@@ -220,142 +207,28 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       payload: tabId,
     });
 
-    const source = this.requireTab(tabId);
+    const source = this.tabs.get(tabId);
+    if (!source) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
     const duplicate = createTab({
       ...source,
       id: this.nextTabId++,
       active: false,
       title: `${source.title ?? 'Tab'} copy`,
+      index: (source.index ?? 0) + 1,
     });
     this.tabs.set(duplicate.id as number, duplicate);
-    return duplicate;
+    return { ...duplicate };
   }
 
-  async moveTab(
-    session: CliSessionRecord,
-    tabId: number,
-    options: CliMoveTabOptions
-  ): Promise<CliTabInfo> {
-    this.calls.push({
-      method: 'moveTab',
-      sessionId: session.id,
-      payload: {
-        tabId,
-        options,
-      },
-    });
-
-    const tab = this.requireStoredTab(tabId);
-    if (options.windowId !== undefined) {
-      tab.windowId = options.windowId;
+  private setActiveTab(windowId: number, activeTabId: number): void {
+    for (const tab of this.tabs.values()) {
+      if (tab.windowId === windowId) {
+        tab.active = tab.id === activeTabId;
+      }
     }
-    if (options.index !== undefined) {
-      tab.index = options.index;
-    }
-
-    return this.requireTab(tabId);
-  }
-
-  async pinTabs(
-    session: CliSessionRecord,
-    tabIds: number[],
-    pinned: boolean
-  ): Promise<CliTabInfo[]> {
-    this.calls.push({
-      method: 'pinTabs',
-      sessionId: session.id,
-      payload: {
-        tabIds,
-        pinned,
-      },
-    });
-
-    return tabIds.map((tabId) => {
-      const tab = this.requireStoredTab(tabId);
-      tab.pinned = pinned;
-      return this.requireTab(tabId);
-    });
-  }
-
-  async muteTabs(
-    session: CliSessionRecord,
-    tabIds: number[],
-    muted: boolean
-  ): Promise<CliTabInfo[]> {
-    this.calls.push({
-      method: 'muteTabs',
-      sessionId: session.id,
-      payload: {
-        tabIds,
-        muted,
-      },
-    });
-
-    return tabIds.map((tabId) => {
-      const tab = this.requireStoredTab(tabId);
-      tab.muted = muted;
-      return this.requireTab(tabId);
-    });
-  }
-
-  async groupTabs(
-    session: CliSessionRecord,
-    tabIds: number[]
-  ): Promise<{ groupId: number; tabs: CliTabInfo[] }> {
-    this.calls.push({
-      method: 'groupTabs',
-      sessionId: session.id,
-      payload: tabIds,
-    });
-
-    const groupId = 77;
-    const tabs = tabIds.map((tabId) => {
-      const tab = this.requireStoredTab(tabId);
-      tab.groupId = groupId;
-      return this.requireTab(tabId);
-    });
-
-    return {
-      groupId,
-      tabs,
-    };
-  }
-
-  async ungroupTabs(session: CliSessionRecord, tabIds: number[]): Promise<CliTabInfo[]> {
-    this.calls.push({
-      method: 'ungroupTabs',
-      sessionId: session.id,
-      payload: tabIds,
-    });
-
-    return tabIds.map((tabId) => {
-      const tab = this.requireStoredTab(tabId);
-      tab.groupId = -1;
-      return this.requireTab(tabId);
-    });
-  }
-
-  private requireStoredTab(tabId: number): CliTabInfo {
-    const tab = this.tabs.get(tabId);
-    if (!tab) {
-      throw new Error(`Missing tab ${tabId}`);
-    }
-
-    return tab;
-  }
-
-  private requireTab(tabId: number): CliTabInfo {
-    return { ...this.requireStoredTab(tabId) };
-  }
-
-  private shouldIncludeTabInList(tabId: number): boolean {
-    const remainingHiddenListCalls = this.delayedListVisibility.get(tabId) ?? 0;
-    if (remainingHiddenListCalls <= 0) {
-      return true;
-    }
-
-    this.delayedListVisibility.set(tabId, remainingHiddenListCalls - 1);
-    return false;
   }
 }
 
@@ -397,322 +270,28 @@ describe('native CLI tabs commands', () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  it('lists tabs in the current window by default and auto-creates a session', async () => {
+  it('lists tabs in the managed session window and reports the current session tab', async () => {
     const outcome = await runCliCommand(['tabs', 'list', '--json'], tempHome, browserService, now);
     const payload = JSON.parse(outcome.stdout);
 
     expect(outcome.exitCode).toBe(0);
     expect(payload.sessionId).toBe('s1');
     expect(payload.data.count).toBe(2);
+    expect(payload.data.currentTabId).toBe(101);
     expect(payload.data.tabs).toEqual([
-      {
+      expect.objectContaining({
         id: 101,
         windowId: 11,
         active: true,
-        pinned: false,
-        audible: false,
-        muted: false,
-        title: 'Home',
         url: 'https://example.com',
-        index: 0,
-        status: 'complete',
-        groupId: -1,
-      },
-      {
+      }),
+      expect.objectContaining({
         id: 102,
         windowId: 11,
         active: false,
-        pinned: false,
-        audible: false,
-        muted: false,
-        title: 'Docs',
-        url: 'https://docs.example.com',
-        index: 1,
-        status: 'complete',
-        groupId: -1,
-      },
-    ]);
-    expect(browserService.calls).toEqual([
-      {
-        method: 'createWindow',
-        sessionId: 's1',
-        payload: {
-          focused: false,
-        },
-      },
-      {
-        method: 'listTabs',
-        sessionId: 's1',
-        payload: {
-          windowId: 11,
-        },
-      },
-    ]);
-  });
-
-  it('lists tabs across all windows when --all is provided', async () => {
-    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
-
-    const outcome = await runCliCommand(['tabs', 'list', '--all', '--json'], tempHome, browserService, now);
-    const payload = JSON.parse(outcome.stdout);
-
-    expect(outcome.exitCode).toBe(0);
-    expect(payload.sessionId).toBe('alpha');
-    expect(payload.data.count).toBe(3);
-    expect(browserService.calls.at(-1)).toEqual({
-      method: 'listTabs',
-      sessionId: 'alpha',
-      payload: {},
-    });
-  });
-
-  it('sets, shows, and clears a pinned target tab for the session', async () => {
-    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
-
-    const set = await runCliCommand(
-      ['tabs', 'target', 'set', '102', '--session', 'alpha', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const show = await runCliCommand(
-      ['tabs', 'target', 'show', '--session', 'alpha', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const clear = await runCliCommand(
-      ['tabs', 'target', 'clear', '--session', 'alpha', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-
-    const setPayload = JSON.parse(set.stdout);
-    const showPayload = JSON.parse(show.stdout);
-    const clearPayload = JSON.parse(clear.stdout);
-
-    expect(set.exitCode).toBe(0);
-    expect(show.exitCode).toBe(0);
-    expect(clear.exitCode).toBe(0);
-    expect(setPayload.sessionId).toBe('alpha');
-    expect(setPayload.data.targetTabId).toBe(102);
-    expect(showPayload.data).toEqual({
-      targetTabId: 102,
-      tab: expect.objectContaining({
-        id: 102,
         url: 'https://docs.example.com',
       }),
-      stale: false,
-    });
-    expect(clearPayload.data).toEqual({
-      clearedTargetTabId: 102,
-      targetTabId: null,
-    });
-  });
-
-  it('opens a tab with parsed options', async () => {
-    const outcome = await runCliCommand(
-      [
-        'tabs',
-        'open',
-        '--url',
-        'https://openai.com',
-        '--window',
-        '22',
-        '--active=false',
-        '--pinned',
-        '--json',
-      ],
-      tempHome,
-      browserService,
-      now
-    );
-    const payload = JSON.parse(outcome.stdout);
-
-    expect(outcome.exitCode).toBe(0);
-    expect(payload.sessionId).toBe('s1');
-    expect(payload.data).toEqual({
-      tab: {
-        id: 300,
-        windowId: 22,
-        active: false,
-        pinned: true,
-        audible: false,
-        muted: false,
-        title: 'Opened tab',
-        url: 'https://openai.com',
-        index: 99,
-        status: 'complete',
-        groupId: -1,
-      },
-      createdNewTab: true,
-      reusedExistingTab: false,
-    });
-    expect(browserService.calls).toEqual([
-      {
-        method: 'createWindow',
-        sessionId: 's1',
-        payload: {
-          focused: false,
-        },
-      },
-      {
-        method: 'listTabs',
-        sessionId: 's1',
-        payload: {
-          windowId: 22,
-        },
-      },
-      {
-        method: 'openTab',
-        sessionId: 's1',
-        payload: {
-          url: 'https://openai.com',
-          windowId: 22,
-          active: false,
-          pinned: true,
-        },
-      },
-      {
-        method: 'listTabs',
-        sessionId: 's1',
-        payload: {
-          currentWindow: false,
-        },
-      },
     ]);
-  });
-
-  it('waits for a newly opened tab to appear in all-tabs listings before returning', async () => {
-    const open = await runCliCommand(
-      ['tabs', 'open', 'https://eventual.example.com', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const list = await runCliCommand(
-      ['tabs', 'list', '--all', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-
-    const openPayload = JSON.parse(open.stdout);
-    const listPayload = JSON.parse(list.stdout);
-
-    expect(open.exitCode).toBe(0);
-    expect(openPayload.data.tab.id).toBe(300);
-    expect(list.exitCode).toBe(0);
-    expect(listPayload.data.count).toBe(4);
-    expect(listPayload.data.tabs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 300,
-          url: 'https://eventual.example.com',
-        }),
-      ])
-    );
-  });
-
-  it('opens a tab with a named session created via the global --session flag', async () => {
-    const create = await runCliCommand(
-      ['session', 'create', '--session', 'linkedin-dm-task1', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const open = await runCliCommand(
-      [
-        'tabs',
-        'open',
-        'https://www.linkedin.com/messaging/',
-        '--active=false',
-        '--session',
-        'linkedin-dm-task1',
-        '--json',
-      ],
-      tempHome,
-      browserService,
-      now
-    );
-
-    const createPayload = JSON.parse(create.stdout);
-    const openPayload = JSON.parse(open.stdout);
-
-    expect(create.exitCode).toBe(0);
-    expect(createPayload.sessionId).toBe('linkedin-dm-task1');
-    expect(open.exitCode).toBe(0);
-    expect(openPayload.sessionId).toBe('linkedin-dm-task1');
-    expect(browserService.calls.filter((call) => call.method !== 'getWindow').slice(-3)).toEqual([
-      {
-        method: 'listTabs',
-        sessionId: 'linkedin-dm-task1',
-        payload: {
-          windowId: 11,
-        },
-      },
-      {
-        method: 'openTab',
-        sessionId: 'linkedin-dm-task1',
-        payload: {
-          url: 'https://www.linkedin.com/messaging/',
-          active: false,
-          windowId: 11,
-        },
-      },
-      {
-        method: 'listTabs',
-        sessionId: 'linkedin-dm-task1',
-        payload: {
-          currentWindow: false,
-        },
-      },
-    ]);
-  });
-
-  it('prints resolved tab context for state-changing tab commands', async () => {
-    const openOutcome = await runCliCommand(
-      ['tabs', 'open', 'https://openai.com'],
-      tempHome,
-      browserService,
-      now
-    );
-
-    expect(openOutcome.exitCode).toBe(0);
-    expect(openOutcome.stdout).toContain(
-      'Opened tab 300 window=11 "Opened tab" https://openai.com'
-    );
-  });
-
-  it('reports when Chrome reuses an existing blank or loading tab', async () => {
-    const outcome = await runCliCommand(
-      ['tabs', 'open', 'https://reuse.example.com', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const payload = JSON.parse(outcome.stdout);
-
-    expect(outcome.exitCode).toBe(0);
-    expect(payload.data.createdNewTab).toBe(false);
-    expect(payload.data.reusedExistingTab).toBe(true);
-    expect(payload.data.tab.id).toBe(102);
-  });
-
-  it('reuses an existing exact-url tab before opening a duplicate', async () => {
-    const outcome = await runCliCommand(
-      ['tabs', 'open', 'https://docs.example.com', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const payload = JSON.parse(outcome.stdout);
-
-    expect(outcome.exitCode).toBe(0);
-    expect(payload.data.createdNewTab).toBe(false);
-    expect(payload.data.reusedExistingTab).toBe(true);
-    expect(payload.data.tab.id).toBe(102);
     expect(browserService.calls).toEqual([
       {
         method: 'createWindow',
@@ -731,143 +310,178 @@ describe('native CLI tabs commands', () => {
     ]);
   });
 
-  it('activates, closes others, and closes explicit tab ids', async () => {
+  it('returns the current managed tab and syncs it into the session', async () => {
     await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
 
-    const activate = await runCliCommand(['tabs', 'activate', '102', '--json'], tempHome, browserService, now);
-    const closeOthers = await runCliCommand(
-      ['tabs', 'close-others', '--window', '11', '--keep', '102', '--json'],
+    const current = await runCliCommand(['tabs', 'current', '--json'], tempHome, browserService, now);
+    const sessionInfo = await runCliCommand(['session', 'info', '--json'], tempHome, browserService, now);
+
+    const currentPayload = JSON.parse(current.stdout);
+    const sessionPayload = JSON.parse(sessionInfo.stdout);
+
+    expect(current.exitCode).toBe(0);
+    expect(currentPayload.data.currentTabId).toBe(101);
+    expect(currentPayload.data.tab).toEqual(
+      expect.objectContaining({
+        id: 101,
+        active: true,
+      })
+    );
+    expect(sessionPayload.data.session.targetTabId).toBe(101);
+  });
+
+  it('opens a fresh tab with tabs new and makes it the current tab', async () => {
+    const outcome = await runCliCommand(
+      ['tabs', 'new', 'https://openai.com', '--json'],
       tempHome,
       browserService,
       now
     );
-    const close = await runCliCommand(['tabs', 'close', '201', '--json'], tempHome, browserService, now);
+    const sessionInfo = await runCliCommand(['session', 'info', '--json'], tempHome, browserService, now);
 
-    const activatePayload = JSON.parse(activate.stdout);
-    const closeOthersPayload = JSON.parse(closeOthers.stdout);
-    const closePayload = JSON.parse(close.stdout);
+    const payload = JSON.parse(outcome.stdout);
+    const sessionPayload = JSON.parse(sessionInfo.stdout);
 
-    expect(activate.exitCode).toBe(0);
-    expect(closeOthers.exitCode).toBe(0);
-    expect(close.exitCode).toBe(0);
-    expect(activatePayload.data.tab.id).toBe(102);
-    expect(activatePayload.data.tab.active).toBe(true);
-    expect(closeOthersPayload.data).toEqual({
-      closedTabIds: [101],
-      keptTabIds: [102],
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.currentTabId).toBe(300);
+    expect(payload.data.tab).toEqual(
+      expect.objectContaining({
+        id: 300,
+        windowId: 11,
+        active: true,
+        url: 'https://openai.com',
+      })
+    );
+    expect(sessionPayload.data.session.targetTabId).toBe(300);
+    expect(browserService.calls).toContainEqual({
+      method: 'openTab',
+      sessionId: 's1',
+      payload: {
+        url: 'https://openai.com',
+        windowId: 11,
+        active: true,
+      },
     });
-    expect(closePayload.data).toEqual({
-      closed: true,
-      tabIds: [201],
-    });
-    expect(browserService.calls.filter((call) => call.method !== 'getWindow').slice(-3)).toEqual([
+  });
+
+  it('uses an existing tab in the managed window and makes it current', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    browserService.calls.length = 0;
+
+    const outcome = await runCliCommand(['tabs', 'use', '102', '--json'], tempHome, browserService, now);
+    const sessionInfo = await runCliCommand(['session', 'info', '--json'], tempHome, browserService, now);
+
+    const payload = JSON.parse(outcome.stdout);
+    const sessionPayload = JSON.parse(sessionInfo.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.currentTabId).toBe(102);
+    expect(payload.data.tab).toEqual(
+      expect.objectContaining({
+        id: 102,
+        active: true,
+      })
+    );
+    expect(sessionPayload.data.session.targetTabId).toBe(102);
+    expect(browserService.calls).toEqual([
+      {
+        method: 'getWindow',
+        sessionId: 'alpha',
+        payload: 11,
+      },
+      {
+        method: 'getTab',
+        sessionId: 'alpha',
+        payload: 102,
+      },
       {
         method: 'activateTab',
         sessionId: 'alpha',
         payload: 102,
       },
       {
-        method: 'closeOtherTabs',
+        method: 'getWindow',
         sessionId: 'alpha',
-        payload: {
-          windowId: 11,
-          keepTabId: 102,
-        },
-      },
-      {
-        method: 'closeTabs',
-        sessionId: 'alpha',
-        payload: [201],
+        payload: 11,
       },
     ]);
   });
 
-  it('moves, pins, mutes, groups, and ungroups tabs', async () => {
-    const move = await runCliCommand(
-      ['tabs', 'move', '102', '--window', '22', '--index', '5', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
-    const pin = await runCliCommand(['tabs', 'pin', '101', '102', '--json'], tempHome, browserService, now);
-    const mute = await runCliCommand(['tabs', 'mute', '101', '--json'], tempHome, browserService, now);
-    const group = await runCliCommand(['tabs', 'group', '101', '102', '--json'], tempHome, browserService, now);
-    const ungroup = await runCliCommand(['tabs', 'ungroup', '101', '102', '--json'], tempHome, browserService, now);
+  it('closes the current tab and falls back to another managed-window tab', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    await runCliCommand(['tabs', 'use', '102', '--json'], tempHome, browserService, now);
+    browserService.calls.length = 0;
 
-    const movePayload = JSON.parse(move.stdout);
-    const pinPayload = JSON.parse(pin.stdout);
-    const mutePayload = JSON.parse(mute.stdout);
-    const groupPayload = JSON.parse(group.stdout);
-    const ungroupPayload = JSON.parse(ungroup.stdout);
+    const close = await runCliCommand(['tabs', 'close', '--json'], tempHome, browserService, now);
+    const sessionInfo = await runCliCommand(['session', 'info', '--json'], tempHome, browserService, now);
 
-    expect(move.exitCode).toBe(0);
-    expect(pin.exitCode).toBe(0);
-    expect(mute.exitCode).toBe(0);
-    expect(group.exitCode).toBe(0);
-    expect(ungroup.exitCode).toBe(0);
-    expect(movePayload.data.tab.windowId).toBe(22);
-    expect(movePayload.data.tab.index).toBe(5);
-    expect(pinPayload.data.tabs).toEqual([
-      expect.objectContaining({ id: 101, pinned: true }),
-      expect.objectContaining({ id: 102, pinned: true }),
-    ]);
-    expect(mutePayload.data.tabs).toEqual([expect.objectContaining({ id: 101, muted: true })]);
-    expect(groupPayload.data).toEqual({
-      groupId: 77,
-      tabs: [
-        expect.objectContaining({ id: 101, groupId: 77 }),
-        expect.objectContaining({ id: 102, groupId: 77 }),
-      ],
+    const closePayload = JSON.parse(close.stdout);
+    const sessionPayload = JSON.parse(sessionInfo.stdout);
+
+    expect(close.exitCode).toBe(0);
+    expect(closePayload.data).toEqual({
+      closedTabId: 102,
+      currentTabId: 101,
+      currentTab: expect.objectContaining({
+        id: 101,
+        active: true,
+      }),
     });
-    expect(ungroupPayload.data.tabs).toEqual([
-      expect.objectContaining({ id: 101, groupId: -1 }),
-      expect.objectContaining({ id: 102, groupId: -1 }),
-    ]);
-    expect(browserService.calls.filter((call) => call.method !== 'getWindow')).toEqual([
-      {
-        method: 'createWindow',
-        sessionId: 's1',
-        payload: {
-          focused: false,
-        },
-      },
-      {
-        method: 'moveTab',
-        sessionId: 's1',
-        payload: {
-          tabId: 102,
-          options: {
-            windowId: 22,
-            index: 5,
-          },
-        },
-      },
-      {
-        method: 'pinTabs',
-        sessionId: 's1',
-        payload: {
-          tabIds: [101, 102],
-          pinned: true,
-        },
-      },
-      {
-        method: 'muteTabs',
-        sessionId: 's1',
-        payload: {
-          tabIds: [101],
-          muted: true,
-        },
-      },
-      {
-        method: 'groupTabs',
-        sessionId: 's1',
-        payload: [101, 102],
-      },
-      {
-        method: 'ungroupTabs',
-        sessionId: 's1',
-        payload: [101, 102],
-      },
-    ]);
+    expect(sessionPayload.data.session.targetTabId).toBe(101);
+  });
+
+  it('closes the other tabs in the managed window and keeps the current tab', async () => {
+    await runCliCommand(['tabs', 'new', 'https://openai.com', '--json'], tempHome, browserService, now);
+    browserService.calls.length = 0;
+
+    const closeOthers = await runCliCommand(['tabs', 'close-others', '--json'], tempHome, browserService, now);
+    const list = await runCliCommand(['tabs', 'list', '--json'], tempHome, browserService, now);
+
+    const closePayload = JSON.parse(closeOthers.stdout);
+    const listPayload = JSON.parse(list.stdout);
+
+    expect(closeOthers.exitCode).toBe(0);
+    expect(closePayload.data).toEqual({
+      closedTabIds: [101, 102],
+      keptTabId: 300,
+      currentTabId: 300,
+      tab: expect.objectContaining({
+        id: 300,
+        active: true,
+      }),
+    });
+    expect(listPayload.data.count).toBe(1);
+    expect(listPayload.data.currentTabId).toBe(300);
+  });
+
+  it('reloads and duplicates the current tab', async () => {
+    await runCliCommand(['tabs', 'current', '--json'], tempHome, browserService, now);
+    browserService.calls.length = 0;
+
+    const reload = await runCliCommand(['tabs', 'reload', '--json'], tempHome, browserService, now);
+    const duplicate = await runCliCommand(['tabs', 'duplicate', '--json'], tempHome, browserService, now);
+    const sessionInfo = await runCliCommand(['session', 'info', '--json'], tempHome, browserService, now);
+
+    const reloadPayload = JSON.parse(reload.stdout);
+    const duplicatePayload = JSON.parse(duplicate.stdout);
+    const sessionPayload = JSON.parse(sessionInfo.stdout);
+
+    expect(reload.exitCode).toBe(0);
+    expect(duplicate.exitCode).toBe(0);
+    expect(reloadPayload.data.tab).toEqual(
+      expect.objectContaining({
+        id: 101,
+      })
+    );
+    expect(duplicatePayload.data).toEqual({
+      sourceTabId: 101,
+      currentTabId: 300,
+      tab: expect.objectContaining({
+        id: 300,
+        active: true,
+        title: 'Home copy',
+      }),
+    });
+    expect(sessionPayload.data.session.targetTabId).toBe(300);
   });
 });

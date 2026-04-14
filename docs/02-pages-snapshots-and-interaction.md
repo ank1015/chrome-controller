@@ -15,9 +15,9 @@ This is the page most agents will use the most.
 
 ## The standard interaction loop
 
-Page and element commands first use the session's pinned target tab when one is set.
+Page and element commands first use the session's current tab when one is set.
 
-If the session does not have a pinned target tab yet, they fall back to the active tab in the current window.
+If the session does not have a current tab remembered yet, they fall back to the active tab in the managed session window.
 
 That is convenient, but it also means `page goto` without `--tab` can replace the currently active tab when you have not pinned a target yet.
 
@@ -33,7 +33,7 @@ If you need to pin an already-open tab manually, use:
 
 ```bash
 chrome-controller tabs list --json
-chrome-controller tabs target set 456
+chrome-controller tabs use 456
 chrome-controller page url
 chrome-controller page title
 ```
@@ -152,9 +152,9 @@ Notes:
 
 ## Page commands
 
-Page commands use the session's pinned target tab by default when one exists.
+Page commands use the session's current tab by default when one exists.
 
-Pass `--tab <id>` when you want a specific tab, or when you want to override the pinned target for one command.
+Pass `--tab <id>` when you want a specific tab, or when you want to override the current tab for one command.
 
 ### `page goto <url> [--tab <id>]`
 
@@ -162,8 +162,8 @@ Navigate a tab to a URL.
 
 Important:
 
-- without `--tab`, this navigates the session target tab when pinned, otherwise the active tab in the current window
-- use `open --ready` or `tabs target set` when you want safer default targeting across many later commands
+- without `--tab`, this navigates the session's current tab when remembered, otherwise the active tab in the managed session window
+- use `open --ready`, `tabs use`, or `tabs new` when you want safer default targeting across many later commands
 - after important navigations, verify with `page url` or `page title`, especially on sites that redirect or update state after load
 
 Examples:
@@ -456,7 +456,7 @@ The JSON result includes positions such as:
 
 ## Keyboard commands
 
-Keyboard commands use the pinned session target tab by default, with fallback to the active tab in the current window.
+Keyboard commands use the session's current tab by default, with fallback to the active tab in the managed session window.
 
 Important:
 

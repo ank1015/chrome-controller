@@ -99,11 +99,9 @@ export async function resolveTab(
         url: tab.url,
         title: tab.title,
       };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Pinned target tab ${session.targetTabId} for session ${session.id} could not be resolved (${message}). Run \`chrome-controller tabs target clear --session ${session.id}\` or \`chrome-controller tabs target set <tabId> --session ${session.id}\`.`
-      );
+    } catch {
+      // Fall back to the active tab in the managed window when the remembered
+      // session tab has disappeared or moved elsewhere.
     }
   }
 
@@ -120,7 +118,7 @@ export async function resolveTab(
       throw new Error(`Could not resolve an active tab in managed window ${session.windowId}`);
     }
 
-    throw new Error('Could not resolve an active tab in the current window');
+    throw new Error('Could not resolve an active tab in the managed session window');
   }
 
   return {
@@ -132,15 +130,15 @@ export async function resolveTab(
 
 export function createImplicitTabResolutionHelpLines(): string[] {
   return [
-    '  When --tab is omitted, the pinned session target tab is used first.',
-    '  If no pinned target tab exists, the active tab in the managed session window is used.',
+    "  When --tab is omitted, the session's current tab is used first.",
+    "  If the session's current tab is missing or not set, the active tab in the managed session window is used.",
   ];
 }
 
 export function createImplicitTabUrlScopeHelpLines(): string[] {
   return [
-    '  When no scope is provided, commands use the pinned session target tab URL first.',
-    '  If no pinned target tab exists, they fall back to the active tab URL in the managed session window.',
+    "  When no scope is provided, commands use the session's current tab URL first.",
+    "  If the session's current tab is missing or not set, they fall back to the active tab URL in the managed session window.",
   ];
 }
 

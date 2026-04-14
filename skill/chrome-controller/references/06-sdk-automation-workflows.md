@@ -28,7 +28,7 @@ Typical flow:
 The SDK does not carry over CLI state such as:
 
 - sessions
-- pinned target tabs
+- current session tabs
 - snapshot caches
 - `@eN` refs
 - CLI artifact folders
@@ -132,7 +132,7 @@ main().catch((error) => {
 
 ## Pattern: resolve your tab explicitly
 
-In the CLI, page-level commands can follow the current session and pinned target tab.
+In the CLI, page-level commands can follow the current session and current tab.
 
 In the SDK, do not rely on “whatever tab is active right now” unless that is truly what you want.
 

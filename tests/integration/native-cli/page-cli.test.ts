@@ -79,6 +79,27 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     return { ...tab };
   }
 
+  async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
+    this.calls.push({
+      method: 'activateTab',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
+    for (const candidate of this.tabs.values()) {
+      if (candidate.windowId === tab.windowId) {
+        candidate.active = candidate.id === tabId;
+      }
+    }
+
+    return { ...tab, active: true };
+  }
+
   async navigateTab(
     session: CliSessionRecord,
     tabId: number,
@@ -295,10 +316,10 @@ describe('native CLI page commands', () => {
     });
   });
 
-  it('uses the session pinned target tab when no explicit --tab is provided', async () => {
+  it('uses the session current tab when no explicit --tab is provided', async () => {
     await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
     await runCliCommand(
-      ['tabs', 'target', 'set', '102', '--session', 'alpha', '--json'],
+      ['tabs', 'use', '102', '--session', 'alpha', '--json'],
       tempHome,
       browserService,
       now

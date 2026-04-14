@@ -203,10 +203,6 @@ export class ChromeBrowserService implements BrowserService {
       active: true,
     });
 
-    if (typeof updatedTab.windowId === 'number') {
-      await this.callChrome('windows.update', updatedTab.windowId, { focused: true });
-    }
-
     return normalizeCliTab(updatedTab);
   }
 

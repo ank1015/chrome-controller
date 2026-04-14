@@ -12,7 +12,7 @@ Use these commands when you need to preserve state across runs or interact with 
 
 ## Storage commands
 
-Storage commands use the pinned session target tab by default, with fallback to the active tab in the current window.
+Storage commands use the session's current tab by default, with fallback to the active tab in the managed session window.
 
 They cover:
 
@@ -117,7 +117,7 @@ chrome-controller storage state-load ./state.json --reload
 
 ## Cookies commands
 
-Cookie commands use the pinned session target tab URL first when you do not provide a scope, with fallback to the active tab URL in the current window.
+Cookie commands use the session's current tab URL first when you do not provide a scope, with fallback to the active tab URL in the managed session window.
 
 That means this works:
 

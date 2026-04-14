@@ -9,11 +9,10 @@ Use these when you want a safe starting point instead of building the flow from 
 Use this when you want to open a page without risking an unrelated active tab.
 
 ```bash
-chrome-controller tabs list --json
-chrome-controller tabs open https://example.com --active=false --json
-chrome-controller page url --tab 456
-chrome-controller page title --tab 456
-chrome-controller page snapshot --tab 456
+chrome-controller open https://example.com --ready --json
+chrome-controller page url
+chrome-controller page title
+chrome-controller page snapshot
 ```
 
 Why this pattern is safe:
@@ -27,16 +26,16 @@ Why this pattern is safe:
 Use this for a typical username/password login flow.
 
 ```bash
-chrome-controller tabs open https://example.com/login --active=false --json
-chrome-controller page snapshot --tab 456
-chrome-controller element fill @e1 "alice@example.com" --tab 456
-chrome-controller element fill @e2 "supersecret" --tab 456
-chrome-controller element click @e3 --tab 456
-chrome-controller wait load --tab 456
+chrome-controller open https://example.com/login --ready --json
+chrome-controller page snapshot
+chrome-controller element fill @e1 "alice@example.com"
+chrome-controller element fill @e2 "supersecret"
+chrome-controller element click @e3
+chrome-controller wait load
 chrome-controller wait idle 1000
-chrome-controller page url --tab 456
-chrome-controller page title --tab 456
-chrome-controller page snapshot --tab 456
+chrome-controller page url
+chrome-controller page title
+chrome-controller page snapshot
 ```
 
 For reactive apps:
@@ -49,11 +48,11 @@ For reactive apps:
 Use this when you need to open an inbox page and read visible message content.
 
 ```bash
-chrome-controller tabs open https://mail.google.com --active=false --json
-chrome-controller wait load --tab 456
+chrome-controller open https://mail.google.com --ready --json
+chrome-controller wait load
 chrome-controller wait idle 1500
-chrome-controller page snapshot --tab 456
-chrome-controller page text --tab 456
+chrome-controller page snapshot
+chrome-controller page text
 ```
 
 If the inbox is highly dynamic:
@@ -67,15 +66,15 @@ If the inbox is highly dynamic:
 Use this for chat or composer-style apps.
 
 ```bash
-chrome-controller tabs open https://chatgpt.com --active=false --json
-chrome-controller wait load --tab 456
+chrome-controller open https://chatgpt.com --ready --json
+chrome-controller wait load
 chrome-controller wait idle 1500
-chrome-controller page snapshot --tab 456
-chrome-controller element focus @e1 --tab 456
-chrome-controller element fill @e1 "Summarize the latest README changes." --tab 456
-chrome-controller keyboard press Enter --tab 456
+chrome-controller page snapshot
+chrome-controller element focus @e1
+chrome-controller element fill @e1 "Summarize the latest README changes."
+chrome-controller keyboard press Enter
 chrome-controller wait idle 1000
-chrome-controller page snapshot --tab 456
+chrome-controller page snapshot
 ```
 
 Important:

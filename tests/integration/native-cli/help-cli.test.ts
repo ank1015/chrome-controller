@@ -39,7 +39,7 @@ describe('native CLI help text', () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  it('describes pinned-target-first tab resolution for optional --tab commands', async () => {
+  it('describes current-session-tab resolution for optional --tab commands', async () => {
     const commands = [
       ['page', 'help'],
       ['console', 'help'],
@@ -54,10 +54,10 @@ describe('native CLI help text', () => {
       expect(outcome.exitCode).toBe(0);
       expect(outcome.stderr).toBe('');
       expect(outcome.stdout).toContain(
-        'When --tab is omitted, the pinned session target tab is used first.'
+        "When --tab is omitted, the session's current tab is used first."
       );
       expect(outcome.stdout).toContain(
-        'If no pinned target tab exists, the active tab in the managed session window is used.'
+        "If the session's current tab is missing or not set, the active tab in the managed session window is used."
       );
       expect(outcome.stdout).not.toContain(
         'When --tab is omitted, the current active tab in the current window is used.'
@@ -65,16 +65,16 @@ describe('native CLI help text', () => {
     }
   });
 
-  it('describes pinned-target-first URL scoping for cookies help', async () => {
+  it('describes current-session-tab-first URL scoping for cookies help', async () => {
     const outcome = await runCliCommand(['cookies', 'help'], tempHome);
 
     expect(outcome.exitCode).toBe(0);
     expect(outcome.stderr).toBe('');
     expect(outcome.stdout).toContain(
-      'When no scope is provided, commands use the pinned session target tab URL first.'
+      "When no scope is provided, commands use the session's current tab URL first."
     );
     expect(outcome.stdout).toContain(
-      'If no pinned target tab exists, they fall back to the active tab URL in the managed session window.'
+      "If the session's current tab is missing or not set, they fall back to the active tab URL in the managed session window."
     );
     expect(outcome.stdout).not.toContain(
       'When no scope is provided, commands default to the current active tab URL.'

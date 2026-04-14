@@ -328,7 +328,7 @@ function createSessionDetailLines(
     `Updated: ${session.updatedAt}`,
     `Last used: ${session.lastUsedAt}`,
     `Window: ${session.windowId ?? 'none'}`,
-    `Target tab: ${session.targetTabId ?? 'none'}`,
+    `Current tab: ${session.targetTabId ?? 'none'}`,
   ];
 }
 
@@ -347,7 +347,7 @@ function createSessionListLines(
     lines.push(
       `${session.current ? '*' : ' '} ${session.id}  updated=${session.updatedAt}  window=${
         session.windowId ?? 'none'
-      }  targetTab=${session.targetTabId ?? 'none'}`
+      }  currentTab=${session.targetTabId ?? 'none'}`
     );
   }
 

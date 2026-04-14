@@ -58,7 +58,7 @@ The safest mental model is:
 A session only tracks CLI state such as:
 
 - the current `sessionId`
-- an optional pinned target tab for page-level commands
+- the current tab for page-level commands
 - snapshot caches and `@eN` refs
 - command routing when you omit `--session`
 
@@ -67,11 +67,11 @@ A session does not create:
 - a separate Chrome profile
 - a separate cookie jar
 - a separate tab sandbox
-- a separate browser window unless you create one yourself
+- a separate browser window unless the CLI creates the managed session window
 
-So a brand new session can still control your already-open Chrome windows and tabs.
+So sessions isolate CLI workflow state, not cookies or profile data.
 
-If you want safety, pin a target tab early with `open --ready` or `tabs target set`.
+If you want safety, choose a current tab early with `open --ready`, `tabs use`, or `tabs new`.
 
 ## Command shape
 
@@ -135,20 +135,20 @@ Important:
 
 ### 2. Window default
 
-Window-scoped commands usually default to the current window.
+Window-scoped commands act on the active session's managed window.
 
 Examples:
 
-- `tabs list` defaults to the current window
-- `tabs open` opens into the current window
+- `tabs list` lists tabs in the managed window
+- `tabs new` opens into the managed window
 
 ### 3. Tab default
 
-Most page, element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, upload, and `find` commands use the session's pinned target tab when `--tab` is omitted.
+Most page, element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, upload, and `find` commands use the session's current tab when `--tab` is omitted.
 
-If the session does not have a pinned target tab yet, they fall back to the active tab in the current window.
+If the session does not have a current tab remembered yet, they fall back to the active tab in the managed window.
 
-That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active unless you pin a working tab first or pass `--tab`.
+That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active in the managed window unless you choose a working tab first or pass `--tab`.
 
 ## Safer starting pattern
 
@@ -163,32 +163,32 @@ chrome-controller page title
 This is safer because:
 
 - `open` defaults to `--active=false`
-- it pins the opened or reused tab into the session
+- it remembers the opened or reused tab as the session's current tab
 - `--ready` waits for stable page readiness before returning
-- later page-level commands follow that pinned target by default
+- later page-level commands follow that current tab by default
 
 Manual fallback:
 
 ```bash
 chrome-controller tabs list --json
-chrome-controller tabs open https://example.com --active=false --json
-chrome-controller page url --tab <tabId>
-chrome-controller page title --tab <tabId>
+chrome-controller tabs use <tabId>
+chrome-controller page url
+chrome-controller page title
 ```
 
-Then keep using that explicit tab id, or pin it:
+Or start fresh:
 
 ```bash
-chrome-controller tabs target set <tabId>
-chrome-controller page snapshot --tab <tabId>
-chrome-controller element click @e3 --tab <tabId>
+chrome-controller tabs new https://example.com
+chrome-controller page snapshot
+chrome-controller element click @e3
 ```
 
 ## How to interact with a page
 
 For most tasks, the best loop is:
 
-1. use `open --ready` to open the page or reuse an already-open exact URL match and pin it into the session
+1. use `open --ready` to open the page or reuse an already-open exact URL match and remember it as the session's current tab
 2. verify the tab with `page url` or `page title`
 3. navigate if needed
 4. run `find` when you want a semantic shortlist first
@@ -273,7 +273,7 @@ Then feed the returned center or edges into `mouse move`, `mouse click`, or `mou
 ## Read References As Needed
 
 - [references/01-sessions-windows-tabs.md](references/01-sessions-windows-tabs.md)
-  Read for sessions, windows, tabs, pinned target tabs, and safe browser entry with `open`.
+  Read for sessions, windows, tabs, the current session tab, and safe browser entry with `open`.
 - [references/02-pages-snapshots-and-interaction.md](references/02-pages-snapshots-and-interaction.md)
   Read for `page`, `find`, `element`, `keyboard`, `mouse`, and `wait`.
 - [references/03-debugging-network-console-and-capture.md](references/03-debugging-network-console-and-capture.md)
