@@ -152,17 +152,17 @@ Notes:
 
 ## Page commands
 
-Page commands use the session's current tab by default when one exists.
+Page commands always act on the active session's current tab.
 
-Pass `--tab <id>` when you want a specific tab, or when you want to override the current tab for one command.
+Use `tabs use <tabId>` first when you want page commands to work on a different tab in the managed window.
 
-### `page goto <url> [--tab <id>]`
+### `page goto <url>`
 
 Navigate a tab to a URL.
 
 Important:
 
-- without `--tab`, this navigates the session's current tab when remembered, otherwise the active tab in the managed session window
+- this navigates the session's current tab
 - use `open --ready`, `tabs use`, or `tabs new` when you want safer default targeting across many later commands
 - after important navigations, verify with `page url` or `page title`, especially on sites that redirect or update state after load
 
@@ -170,13 +170,13 @@ Examples:
 
 ```bash
 chrome-controller page goto https://example.com
-chrome-controller page goto https://example.com --tab 456
-chrome-controller page goto https://mail.google.com --tab 456
-chrome-controller page url --tab 456
-chrome-controller page title --tab 456
+chrome-controller tabs use 456
+chrome-controller page goto https://mail.google.com
+chrome-controller page url
+chrome-controller page title
 ```
 
-### `page url [--tab <id>]`
+### `page url`
 
 Return the current page URL.
 
@@ -186,7 +186,7 @@ Example:
 chrome-controller page url --json
 ```
 
-### `page title [--tab <id>]`
+### `page title`
 
 Return the current page title.
 
@@ -196,7 +196,7 @@ Example:
 chrome-controller page title --json
 ```
 
-### `page text [--tab <id>]`
+### `page text`
 
 Extract the page as markdown.
 
@@ -218,7 +218,7 @@ chrome-controller page text
 chrome-controller page text --json
 ```
 
-### `page snapshot [--tab <id>]`
+### `page snapshot`
 
 Capture the page's interactive structure and assign refs like `@e1`, `@e2`, `@e3`.
 
@@ -258,7 +258,7 @@ chrome-controller page snapshot
 chrome-controller page snapshot --json
 ```
 
-### `page eval <code> [--await-promise] [--user-gesture] [--tab <id>]`
+### `page eval <code> [--await-promise] [--user-gesture]`
 
 Run JavaScript in the page.
 
@@ -277,7 +277,7 @@ chrome-controller page eval 'window.location.href' --json
 chrome-controller page eval 'fetch("/api/me").then(r => r.text())' --await-promise --json
 ```
 
-### `page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size] [--tab <id>]`
+### `page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size]`
 
 Save the current page as a PDF.
 
@@ -297,6 +297,28 @@ Examples:
 ```bash
 chrome-controller page pdf
 chrome-controller page pdf ./invoice.pdf --format a4 --background
+```
+
+### `page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]`
+
+Capture a screenshot of the session's current tab.
+
+Options:
+
+- `path`: output file path
+- `--format <png|jpeg|webp>`: screenshot format
+- `--quality <0-100>`: quality for JPEG output
+- `--full-page`: capture beyond the viewport
+
+If you omit `path`, the screenshot is saved under `CHROME_CONTROLLER_HOME/artifacts/screenshots`.
+
+Examples:
+
+```bash
+chrome-controller page screenshot
+chrome-controller page screenshot ./page.png
+chrome-controller page screenshot ./page.jpg --format jpeg --quality 85
+chrome-controller page screenshot ./full.webp --format webp --full-page
 ```
 
 ## Element commands

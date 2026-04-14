@@ -312,6 +312,7 @@ Notes:
 
 - if `path` is omitted, the screenshot is saved under `CHROME_CONTROLLER_HOME/artifacts/screenshots`
 - `--quality` only matters for JPEG
+- `page screenshot` provides the same capture flow from the page command group
 
 Examples:
 

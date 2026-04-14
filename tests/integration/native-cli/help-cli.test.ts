@@ -41,7 +41,6 @@ describe('native CLI help text', () => {
 
   it('describes current-session-tab resolution for optional --tab commands', async () => {
     const commands = [
-      ['page', 'help'],
       ['console', 'help'],
       ['storage', 'help'],
       ['upload', 'help'],
@@ -63,6 +62,23 @@ describe('native CLI help text', () => {
         'When --tab is omitted, the current active tab in the current window is used.'
       );
     }
+  });
+
+  it('describes page commands as acting on the session current tab', async () => {
+    const outcome = await runCliCommand(['page', 'help'], tempHome);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.stderr).toBe('');
+    expect(outcome.stdout).toContain(
+      "All page commands act on the active session's current tab."
+    );
+    expect(outcome.stdout).toContain(
+      'Use `tabs use <tabId>` to switch which tab page commands operate on.'
+    );
+    expect(outcome.stdout).toContain('chrome-controller page screenshot');
+    expect(outcome.stdout).not.toContain(
+      "When --tab is omitted, the session's current tab is used first."
+    );
   });
 
   it('describes current-session-tab-first URL scoping for cookies help', async () => {

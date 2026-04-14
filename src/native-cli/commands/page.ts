@@ -11,16 +11,22 @@ import {
 import { createPageMarkdown } from '../page-markdown.js';
 import { getChromeControllerHome, SessionStore } from '../session-store.js';
 import { sleep } from '../interaction-support.js';
+import {
+  captureScreenshotForTab,
+  parseScreenshotOptions,
+} from './screenshot.js';
 
 import {
-  createImplicitTabResolutionHelpLines,
-  parseOptionalTabFlag,
   resolveSession,
-  resolveTab,
-  resolveTabId,
 } from './support.js';
 
-import type { BrowserService, CliCommandResult, CliRunOptions } from '../types.js';
+import type {
+  BrowserService,
+  CliCommandResult,
+  CliRunOptions,
+  CliSessionRecord,
+  CliTabInfo,
+} from '../types.js';
 
 interface PageCommandOptions {
   args: string[];
@@ -50,6 +56,8 @@ export async function runPageCommand(
       return await runPageEvalCommand(rest, options);
     case 'pdf':
       return await runPagePdfCommand(rest, options);
+    case 'screenshot':
+      return await runPageScreenshotCommand(rest, options);
     case 'help':
     case '--help':
     case '-h':
@@ -65,21 +73,15 @@ async function runGotoPageCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page goto');
-  const [url, ...rest] = args;
+  const [url, ...rest] = rawArgs;
   if (!url) {
-    throw new Error('Usage: chrome-controller page goto <url> [--tab <id>]');
+    throw new Error('Usage: chrome-controller page goto <url>');
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for page goto: ${rest[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tab = await resolveTab(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolvePageTab(options);
   const updatedTab = await options.browserService.navigateTab(session, tab.id, url);
   const resolvedTab = await resolveNavigatedTab(
     options.browserService,
@@ -103,17 +105,11 @@ async function runPageUrlCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page url');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for page url: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for page url: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tab = await resolveTab(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolvePageTab(options);
 
   return {
     session,
@@ -129,17 +125,11 @@ async function runPageTitleCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page title');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for page title: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for page title: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tab = await resolveTab(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolvePageTab(options);
 
   return {
     session,
@@ -155,17 +145,12 @@ async function runPageTextCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page text');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for page text: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for page text: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'text');
   const rawTextCapture = await captureStablePageText(options.browserService, session, tabId);
   const pageMarkdown = createPageMarkdown(rawTextCapture);
 
@@ -185,14 +170,9 @@ async function runPageEvalCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page eval');
-  const parsed = parsePageEvalArgs(args);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parsePageEvalArgs(rawArgs);
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'eval');
   const result = await options.browserService.evaluateTab(session, tabId, parsed.code, {
     ...(parsed.awaitPromise ? { awaitPromise: true } : {}),
     ...(parsed.userGesture ? { userGesture: true } : {}),
@@ -212,17 +192,12 @@ async function runPageSnapshotCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page snapshot');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for page snapshot: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for page snapshot: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'snapshot');
   const rawSnapshot = await captureStablePageSnapshot(options.browserService, session, tabId);
   const snapshotRecord = createPageSnapshotRecord({
     sessionId: session.id,
@@ -257,14 +232,9 @@ async function runPagePdfCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page pdf');
-  const parsed = parsePagePdfArgs(args, options.env);
-  const session = await resolveSession(
-    options.sessionStore,
-    options.browserService,
-    options.explicitSessionId
-  );
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parsePagePdfArgs(rawArgs, options.env);
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'pdf');
   const pdf = await options.browserService.printToPdf(session, tabId, {
     ...(parsed.landscape ? { landscape: true } : {}),
     ...(parsed.printBackground ? { printBackground: true } : {}),
@@ -291,6 +261,33 @@ async function runPagePdfCommand(
       ...(parsed.scale !== undefined ? { scale: parsed.scale } : {}),
     },
     lines: [`Saved PDF for tab ${tabId} to ${parsed.outputPath}`],
+  };
+}
+
+async function runPageScreenshotCommand(
+  rawArgs: string[],
+  options: PageCommandOptions
+): Promise<CliCommandResult> {
+  const parsed = parseScreenshotOptions(rawArgs, options.env);
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'screenshot');
+  const result = await captureScreenshotForTab(
+    options.browserService,
+    session,
+    tabId,
+    parsed
+  );
+
+  return {
+    session,
+    data: {
+      tabId,
+      path: parsed.outputPath,
+      format: parsed.format,
+      mimeType: `image/${parsed.format === 'jpeg' ? 'jpeg' : parsed.format}`,
+      sizeBytes: result.sizeBytes,
+    },
+    lines: [`Saved screenshot for tab ${tabId} to ${parsed.outputPath}`],
   };
 }
 
@@ -333,7 +330,7 @@ function parsePageEvalArgs(args: string[]): {
 
   if (!code) {
     throw new Error(
-      'Usage: chrome-controller page eval <code> [--await-promise] [--user-gesture] [--tab <id>]'
+      'Usage: chrome-controller page eval <code> [--await-promise] [--user-gesture]'
     );
   }
 
@@ -549,18 +546,87 @@ function createPageHelpLines(): string[] {
   return [
     'Page commands',
     '',
+    "All page commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab page commands operate on.',
+    '',
     'Usage:',
-    '  chrome-controller page goto <url> [--tab <id>]',
-    '  chrome-controller page url [--tab <id>]',
-    '  chrome-controller page title [--tab <id>]',
-    '  chrome-controller page text [--tab <id>]',
-    '  chrome-controller page snapshot [--tab <id>]',
-    '  chrome-controller page eval <code> [--await-promise] [--user-gesture] [--tab <id>]',
-    '  chrome-controller page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size] [--tab <id>]',
+    '  chrome-controller page goto <url>',
+    '  chrome-controller page url',
+    '  chrome-controller page title',
+    '  chrome-controller page text',
+    '  chrome-controller page snapshot',
+    '  chrome-controller page eval <code> [--await-promise] [--user-gesture]',
+    '  chrome-controller page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size]',
+    '  chrome-controller page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]',
     '',
     'Notes:',
-    ...createImplicitTabResolutionHelpLines(),
     '  When no PDF path is provided, the file is saved under CHROME_CONTROLLER_HOME/artifacts/pdfs.',
+    '  When no screenshot path is provided, the file is saved under CHROME_CONTROLLER_HOME/artifacts/screenshots.',
     '  Snapshot output is interactive-first and saves the latest ref map per session/tab.',
+    '  Top-level `open <url>` is the safer way to move to a known URL while reusing an exact match in the managed window when possible.',
   ];
+}
+
+async function resolvePageTab(
+  options: PageCommandOptions
+): Promise<{ session: CliSessionRecord; tab: CliTabInfo }> {
+  let session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabs = await options.browserService.listTabs(session, {
+    windowId: requireManagedWindowId(session),
+  });
+  const tab = selectCurrentPageTab(session, tabs);
+
+  if (!tab || typeof tab.id !== 'number') {
+    if (session.targetTabId !== null) {
+      session = await options.sessionStore.clearTargetTab(session.id);
+    }
+
+    throw new Error(
+      `Managed window ${session.windowId ?? 'unknown'} has no tabs. Run \`chrome-controller tabs new\`.`
+    );
+  }
+
+  if (session.targetTabId !== tab.id) {
+    session = await options.sessionStore.setTargetTab(session.id, tab.id);
+  }
+
+  return {
+    session,
+    tab,
+  };
+}
+
+function selectCurrentPageTab(
+  session: CliSessionRecord,
+  tabs: CliTabInfo[]
+): CliTabInfo | null {
+  const currentTab =
+    typeof session.targetTabId === 'number'
+      ? tabs.find((tab) => tab.id === session.targetTabId) ?? null
+      : null;
+  if (currentTab) {
+    return currentTab;
+  }
+
+  return tabs.find((tab) => tab.active) ?? tabs[0] ?? null;
+}
+
+function requireManagedWindowId(session: CliSessionRecord): number {
+  if (typeof session.windowId !== 'number') {
+    throw new Error(`Could not resolve a managed window for session ${session.id}`);
+  }
+
+  return session.windowId;
+}
+
+function requireTabId(tab: CliTabInfo, commandName: string): number {
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve a tab id for page ${commandName}`);
+  }
+
+  return tab.id;
 }

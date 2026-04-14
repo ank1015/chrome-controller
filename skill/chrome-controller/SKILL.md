@@ -144,11 +144,11 @@ Examples:
 
 ### 3. Tab default
 
-Most page, element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, upload, and `find` commands use the session's current tab when `--tab` is omitted.
+Page commands act on the session's current tab, and most element, keyboard, mouse, debugger, console, network, screenshot, storage, cookies, upload, and `find` commands use the session's current tab when `--tab` is omitted.
 
 If the session does not have a current tab remembered yet, they fall back to the active tab in the managed window.
 
-That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active in the managed window unless you choose a working tab first or pass `--tab`.
+That means commands like `page goto`, `page snapshot`, `element click`, `page text`, and `network start` can act on whatever tab is currently active in the managed window unless you choose a working tab first. Use `tabs use <tabId>` when you want page commands to switch to another managed tab.
 
 ## Safer starting pattern
 

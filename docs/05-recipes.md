@@ -107,10 +107,11 @@ Tips:
 Use this when the page has a file input.
 
 ```bash
-chrome-controller page snapshot --tab 456
+chrome-controller tabs use 456
+chrome-controller page snapshot
 chrome-controller upload files 'input[type=file]' ./resume.pdf --tab 456
 chrome-controller wait idle 1000
-chrome-controller page snapshot --tab 456
+chrome-controller page snapshot
 ```
 
 If the upload button is hidden behind a custom control:
@@ -139,11 +140,12 @@ Useful follow-up commands:
 Use this whenever the page keeps rerendering.
 
 ```bash
-chrome-controller page url --tab 456
-chrome-controller page title --tab 456
+chrome-controller tabs use 456
+chrome-controller page url
+chrome-controller page title
 chrome-controller wait load --tab 456
 chrome-controller wait idle 1000
-chrome-controller page snapshot --tab 456
+chrome-controller page snapshot
 ```
 
 After each important action:

@@ -257,6 +257,62 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       ).toString('base64'),
     };
   }
+
+  async attachDebugger(
+    session: CliSessionRecord,
+    tabId: number
+  ): Promise<{ attached: boolean; alreadyAttached: boolean }> {
+    this.calls.push({
+      method: 'attachDebugger',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    return {
+      attached: true,
+      alreadyAttached: false,
+    };
+  }
+
+  async sendDebuggerCommand(
+    session: CliSessionRecord,
+    tabId: number,
+    method: string,
+    params?: Record<string, unknown>
+  ): Promise<unknown> {
+    this.calls.push({
+      method: 'sendDebuggerCommand',
+      sessionId: session.id,
+      payload: {
+        tabId,
+        method,
+        params: params ?? null,
+      },
+    });
+
+    if (method === 'Page.captureScreenshot') {
+      return {
+        data: Buffer.from('fake image').toString('base64'),
+      };
+    }
+
+    return {};
+  }
+
+  async detachDebugger(
+    session: CliSessionRecord,
+    tabId: number
+  ): Promise<{ detached: boolean }> {
+    this.calls.push({
+      method: 'detachDebugger',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    return {
+      detached: true,
+    };
+  }
 }
 
 async function runCliCommand(
@@ -316,7 +372,7 @@ describe('native CLI page commands', () => {
     });
   });
 
-  it('uses the session current tab when no explicit --tab is provided', async () => {
+  it('uses the session current tab by default', async () => {
     await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
     await runCliCommand(
       ['tabs', 'use', '102', '--session', 'alpha', '--json'],
@@ -342,14 +398,16 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls.filter((call) => call.method !== 'getWindow')).toEqual([
       {
-        method: 'getTab',
+        method: 'listTabs',
         sessionId: 'alpha',
-        payload: 102,
+        payload: {
+          windowId: 11,
+        },
       },
     ]);
   });
 
-  it('navigates the current active tab when no --tab is provided', async () => {
+  it('navigates the current tab by default', async () => {
     const outcome = await runCliCommand(
       ['page', 'goto', 'https://openai.com', '--json'],
       tempHome,
@@ -403,9 +461,19 @@ describe('native CLI page commands', () => {
     ]);
   });
 
-  it('uses an explicit tab id when provided', async () => {
+  it('navigates whichever tab the session is currently using', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    await runCliCommand(
+      ['tabs', 'use', '102', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    browserService.calls.length = 0;
+
     const outcome = await runCliCommand(
-      ['page', 'goto', 'https://platform.openai.com', '--tab', '102', '--json'],
+      ['page', 'goto', 'https://platform.openai.com', '--session', 'alpha', '--json'],
       tempHome,
       browserService,
       now
@@ -419,22 +487,17 @@ describe('native CLI page commands', () => {
         url: 'https://platform.openai.com',
       })
     );
-    expect(browserService.calls).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow')).toEqual([
       {
-        method: 'createWindow',
-        sessionId: 's1',
+        method: 'listTabs',
+        sessionId: 'alpha',
         payload: {
-          focused: false,
+          windowId: 11,
         },
       },
       {
-        method: 'getTab',
-        sessionId: 's1',
-        payload: 102,
-      },
-      {
         method: 'navigateTab',
-        sessionId: 's1',
+        sessionId: 'alpha',
         payload: {
           tabId: 102,
           url: 'https://platform.openai.com',
@@ -442,7 +505,7 @@ describe('native CLI page commands', () => {
       },
       {
         method: 'getTab',
-        sessionId: 's1',
+        sessionId: 'alpha',
         payload: 102,
       },
     ]);
@@ -658,6 +721,75 @@ describe('native CLI page commands', () => {
             paperHeight: 11.69,
           },
         },
+      },
+    ]);
+  });
+
+  it('captures a screenshot file for the current tab', async () => {
+    const outputPath = join(tempHome, 'artifacts', 'custom-page.webp');
+    const outcome = await runCliCommand(
+      ['page', 'screenshot', outputPath, '--format', 'webp', '--full-page', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+    const fileContent = await readFile(outputPath, 'utf8');
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tabId: 101,
+      path: outputPath,
+      format: 'webp',
+      mimeType: 'image/webp',
+      sizeBytes: Buffer.byteLength(fileContent, 'utf8'),
+    });
+    expect(fileContent).toBe('fake image');
+    expect(browserService.calls).toEqual([
+      {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
+        method: 'listTabs',
+        sessionId: 's1',
+        payload: {
+          windowId: 11,
+        },
+      },
+      {
+        method: 'attachDebugger',
+        sessionId: 's1',
+        payload: 101,
+      },
+      {
+        method: 'sendDebuggerCommand',
+        sessionId: 's1',
+        payload: {
+          tabId: 101,
+          method: 'Page.enable',
+          params: null,
+        },
+      },
+      {
+        method: 'sendDebuggerCommand',
+        sessionId: 's1',
+        payload: {
+          tabId: 101,
+          method: 'Page.captureScreenshot',
+          params: {
+            format: 'webp',
+            captureBeyondViewport: true,
+          },
+        },
+      },
+      {
+        method: 'detachDebugger',
+        sessionId: 's1',
+        payload: 101,
       },
     ]);
   });
