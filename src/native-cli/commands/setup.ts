@@ -2,13 +2,16 @@ import { access, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import {
   readChromeControllerConfig,
   writeChromeControllerConfig,
 } from '../config.js';
+import {
+  resolveSetupInstallerPath,
+  resolveStandaloneHostExecutablePath,
+} from '../runtime-paths.js';
 
 import type { CliCommandResult, CliWritable } from '../types.js';
 
@@ -336,18 +339,24 @@ async function runMacSetupInstaller(options: {
     throw new Error('The macOS setup installer can only run on macOS.');
   }
 
-  const scriptPath = fileURLToPath(
-    new URL('../../../install_ext_and_restart_chrome_mac.sh', import.meta.url)
-  );
+  const scriptPath = resolveSetupInstallerPath({
+    platform: options.platform,
+    env: options.env,
+  });
   try {
     await access(scriptPath);
   } catch {
     throw new Error(`Setup installer script not found: ${scriptPath}`);
   }
 
+  const childEnv = createSetupInstallerEnv({
+    env: options.env,
+    platform: options.platform,
+  });
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn('bash', [scriptPath, options.profile.directory], {
-      env: options.env ?? process.env,
+      env: childEnv,
       cwd: dirname(scriptPath),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -383,14 +392,20 @@ async function runWindowsSetupInstaller(options: {
     throw new Error('The Windows setup installer can only run on Windows.');
   }
 
-  const scriptPath = fileURLToPath(
-    new URL('../../../install_ext_and_restart_chrome_windows.ps1', import.meta.url)
-  );
+  const scriptPath = resolveSetupInstallerPath({
+    platform: options.platform,
+    env: options.env,
+  });
   try {
     await access(scriptPath);
   } catch {
     throw new Error(`Setup installer script not found: ${scriptPath}`);
   }
+
+  const childEnv = createSetupInstallerEnv({
+    env: options.env,
+    platform: options.platform,
+  });
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
@@ -404,7 +419,7 @@ async function runWindowsSetupInstaller(options: {
         options.profile.directory,
       ],
       {
-        env: options.env ?? process.env,
+        env: childEnv,
         cwd: dirname(scriptPath),
         stdio: ['ignore', 'pipe', 'pipe'],
       }
@@ -504,7 +519,27 @@ function createSetupHelpLines(): string[] {
     '  Without --profile, setup lists detected Chrome profiles and prompts you to choose one.',
     '  The selected profile is saved to ~/.chrome-controller/config.json (or CHROME_CONTROLLER_HOME/config.json).',
     '  Setup then runs the platform-specific installer script to install the extension, register native messaging, and restart Chrome.',
+    '  In the standalone release zip, setup resolves the installer script and host binary next to the CLI executable.',
   ];
+}
+
+function createSetupInstallerEnv(options: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}): NodeJS.ProcessEnv {
+  const env = {
+    ...process.env,
+    ...(options.env ?? {}),
+  };
+  const standaloneHostExecutable = resolveStandaloneHostExecutablePath({
+    env: env,
+    platform: options.platform,
+  });
+  if (standaloneHostExecutable) {
+    env.CHROME_CONTROLLER_HOST_EXECUTABLE = standaloneHostExecutable;
+  }
+
+  return env;
 }
 
 function formatProfileSummary(profile: ChromeProfileChoice): string {

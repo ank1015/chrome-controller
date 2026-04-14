@@ -37,10 +37,36 @@ DIST_DIR="$SCRIPT_DIR/dist"
 HOST_JS="$DIST_DIR/native/host.js"
 HOST_INSTALL_DIR="$HOME/.local/share/llm-native-host/$HOST_NAME"
 HOST_WRAPPER_PATH="$HOST_INSTALL_DIR/run-host.sh"
+HOST_BINARY_SOURCE="${CHROME_CONTROLLER_HOST_EXECUTABLE:-$SCRIPT_DIR/chrome-controller-host}"
+HOST_BINARY_INSTALL_PATH="$HOST_INSTALL_DIR/chrome-controller-host"
 HOST_MANIFEST_DIR="${CHROME_NATIVE_HOSTS_DIR:-$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts}"
 HOST_MANIFEST_PATH="$HOST_MANIFEST_DIR/$HOST_NAME.json"
 
 install_native_host() {
+  if [[ -f "$HOST_BINARY_SOURCE" ]]; then
+    rm -rf "$HOST_INSTALL_DIR"
+    mkdir -p "$HOST_INSTALL_DIR"
+    cp "$HOST_BINARY_SOURCE" "$HOST_BINARY_INSTALL_PATH"
+    chmod 0755 "$HOST_BINARY_INSTALL_PATH"
+
+    mkdir -p "$HOST_MANIFEST_DIR"
+    cat > "$HOST_MANIFEST_PATH" <<EOF
+{
+  "name": "$HOST_NAME",
+  "description": "LLM native messaging host",
+  "path": "$HOST_BINARY_INSTALL_PATH",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://$EXT_ID/"]
+}
+EOF
+
+    echo "Installed native messaging host:"
+    echo "  source binary: $HOST_BINARY_SOURCE"
+    echo "  installed:     $HOST_BINARY_INSTALL_PATH"
+    echo "  manifest:      $HOST_MANIFEST_PATH"
+    return
+  fi
+
   local node_path
   node_path="$(command -v node || true)"
 
@@ -184,7 +210,11 @@ fi
 
 echo "Target profile: $TARGET_PROFILE"
 echo "Target prefs:   $TARGET_PREFS"
-echo "Host.js:        $HOST_JS"
+if [[ -f "$HOST_BINARY_SOURCE" ]]; then
+  echo "Host binary:    $HOST_BINARY_SOURCE"
+else
+  echo "Host.js:        $HOST_JS"
+fi
 echo "Host manifest:  $HOST_MANIFEST_PATH"
 
 # 1) Write the external extension JSON for this macOS user.

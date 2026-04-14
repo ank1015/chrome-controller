@@ -27,6 +27,9 @@
     "build": "node ./scripts/clean.mjs && pnpm build:native && pnpm build:chrome",
     "build:native": "tsc && node ./scripts/ensure-native-cli-bin.mjs && node ./scripts/copy-build-asset.mjs native",
     "build:chrome": "tsx esbuild.config.ts && node ./scripts/generate-chrome-icons.mjs && node ./scripts/copy-build-asset.mjs chrome",
+    "build:sea:bundles": "node ./scripts/build-sea-bundles.mjs",
+    "build:sea:windows-x64": "node ./scripts/build-sea-release.mjs --platform windows-x64",
+    "build:sea:macos-arm64": "node ./scripts/build-sea-release.mjs --platform macos-arm64",
     "package:chrome-webstore": "pnpm build:chrome && node ./scripts/package-chrome-extension.mjs",
     "test": "vitest run",
     "test:find-live": "pnpm exec tsc && CHROME_CONTROLLER_RUN_LIVE_FIND_TESTS=1 vitest run tests/live/native-cli/find-live.test.ts",
@@ -47,6 +50,7 @@
     "@types/turndown": "^5.0.6",
     "@vitest/coverage-v8": "^2.1.0",
     "esbuild": "^0.24.0",
+    "postject": "^1.0.0-alpha.6",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
   },

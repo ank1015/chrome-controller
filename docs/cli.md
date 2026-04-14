@@ -69,6 +69,7 @@ Notes:
 - setup lists detected Chrome profiles and lets you choose one interactively
 - the selected profile is stored in `~/.chrome-controller/config.json` or `CHROME_CONTROLLER_HOME/config.json`
 - setup then runs the platform-specific installer script to install the extension, register native messaging, and restart Chrome for that profile
+- in the standalone release zip, `setup` resolves the installer script and host binary next to the unpacked CLI executable
 - if the CLI reports that it cannot connect to the bridge, run `chrome-controller setup` again
 
 ## Session Commands

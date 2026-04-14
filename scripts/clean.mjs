@@ -6,6 +6,7 @@ const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
 await Promise.all([
   rm(join(packageDir, 'dist'), { recursive: true, force: true }),
+  rm(join(packageDir, 'dist-sea'), { recursive: true, force: true }),
   rm(join(packageDir, 'artifacts'), { recursive: true, force: true }),
   rm(join(packageDir, 'coverage'), { recursive: true, force: true }),
 ]);

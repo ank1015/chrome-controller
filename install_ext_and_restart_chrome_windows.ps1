@@ -72,9 +72,6 @@ function Set-RegistryDefaultValue {
 function Clear-ExternalUninstallBlock {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$NodePath,
-
-    [Parameter(Mandatory = $true)]
     [string]$PrefsPath,
 
     [Parameter(Mandatory = $true)]
@@ -85,48 +82,51 @@ function Clear-ExternalUninstallBlock {
     throw "Target profile Preferences file not found: $PrefsPath"
   }
 
-  $js = @'
-const fs = require("fs");
-const prefsPath = process.argv[1];
-const extId = process.argv[2];
-const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
-
-if (!prefs.extensions || typeof prefs.extensions !== "object") {
-  prefs.extensions = {};
-}
-
-const uninstalls = prefs.extensions.external_uninstalls;
-prefs.extensions.external_uninstalls = Array.isArray(uninstalls)
-  ? uninstalls.filter((value) => value !== extId)
-  : [];
-
-const tmpPath = prefsPath + ".tmp";
-fs.writeFileSync(tmpPath, JSON.stringify(prefs));
-fs.renameSync(tmpPath, prefsPath);
-'@
-
-  & $NodePath -e $js $PrefsPath $ExtensionId
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to update Chrome Preferences: $PrefsPath"
+  $prefs = Get-Content -LiteralPath $PrefsPath -Raw | ConvertFrom-Json
+  if (-not $prefs.extensions) {
+    $prefs | Add-Member -NotePropertyName extensions -NotePropertyValue ([pscustomobject]@{})
   }
+
+  $existing = @()
+  if ($prefs.extensions.PSObject.Properties.Match('external_uninstalls').Count -gt 0) {
+    $existing = @($prefs.extensions.external_uninstalls)
+  }
+
+  $filtered = @($existing | Where-Object { $_ -ne $ExtensionId })
+  if ($prefs.extensions.PSObject.Properties.Match('external_uninstalls').Count -gt 0) {
+    $prefs.extensions.external_uninstalls = $filtered
+  }
+  else {
+    $prefs.extensions | Add-Member -NotePropertyName external_uninstalls -NotePropertyValue $filtered
+  }
+
+  $tmpPath = "$PrefsPath.tmp"
+  $prefs | ConvertTo-Json -Depth 100 -Compress | Set-Content -LiteralPath $tmpPath -Encoding UTF8
+  Move-Item -LiteralPath $tmpPath -Destination $PrefsPath -Force
 }
 
 function Install-NativeHost {
   param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$NodePath,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$HostJs,
 
     [Parameter(Mandatory = $true)]
     [string]$HostInstallDir,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$HostWrapperPath,
 
     [Parameter(Mandatory = $true)]
     [string]$HostManifestPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HostBinarySource,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HostBinaryInstallPath,
 
     [Parameter(Mandatory = $true)]
     [string]$HostName,
@@ -144,6 +144,29 @@ function Install-NativeHost {
   }
 
   $null = New-Item -ItemType Directory -Path $HostInstallDir -Force
+
+  if ($HostBinarySource -and (Test-Path -LiteralPath $HostBinarySource -PathType Leaf)) {
+    Copy-Item -LiteralPath $HostBinarySource -Destination $HostBinaryInstallPath -Force
+
+    $manifestObject = [ordered]@{
+      name = $HostName
+      description = 'LLM native messaging host'
+      path = $HostBinaryInstallPath
+      type = 'stdio'
+      allowed_origins = @("chrome-extension://$ExtensionId/")
+    }
+
+    $manifestJson = $manifestObject | ConvertTo-Json -Depth 5
+    Set-Content -LiteralPath $HostManifestPath -Value $manifestJson -Encoding UTF8
+
+    Set-RegistryDefaultValue -Key "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName" -Value $HostManifestPath
+
+    Write-Host 'Installed native messaging host:'
+    Write-Host "  source binary: $HostBinarySource"
+    Write-Host "  installed:     $HostBinaryInstallPath"
+    Write-Host "  manifest:      $HostManifestPath"
+    return
+  }
 
   $wrapper = @"
 @echo off
@@ -180,14 +203,19 @@ $DistDir = Join-Path $ScriptDir 'dist'
 $HostJs = Join-Path $DistDir 'native\host.js'
 $HostInstallDir = Join-Path $env:LOCALAPPDATA "llm-native-host\$HOST_NAME"
 $HostWrapperPath = Join-Path $HostInstallDir 'run-host.cmd'
+$HostBinarySource = if ($env:CHROME_CONTROLLER_HOST_EXECUTABLE) { $env:CHROME_CONTROLLER_HOST_EXECUTABLE } else { Join-Path $ScriptDir 'chrome-controller-host.exe' }
+$HostBinaryInstallPath = Join-Path $HostInstallDir 'chrome-controller-host.exe'
 $HostManifestPath = Join-Path $HostInstallDir "$HOST_NAME.json"
 $ExtensionRegKey = "HKCU\Software\Google\Chrome\Extensions\$EXT_ID"
 
-$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-if (-not $nodeCommand) {
-  throw 'node was not found in PATH.'
+$NodePath = $null
+if (-not (Test-Path -LiteralPath $HostBinarySource -PathType Leaf)) {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) {
+    throw 'node was not found in PATH and no standalone chrome-controller-host.exe was found next to the installer.'
+  }
+  $NodePath = $nodeCommand.Source
 }
-$NodePath = $nodeCommand.Source
 
 if (-not (Test-Path -LiteralPath $LocalState -PathType Leaf)) {
   throw "Chrome Local State not found: $LocalState"
@@ -259,7 +287,12 @@ if (-not (Test-Path -LiteralPath $TargetPrefs -PathType Leaf)) {
 
 Write-Host "Target profile: $TargetProfile"
 Write-Host "Target prefs:   $TargetPrefs"
-Write-Host "Host.js:        $HostJs"
+if (Test-Path -LiteralPath $HostBinarySource -PathType Leaf) {
+  Write-Host "Host binary:    $HostBinarySource"
+}
+else {
+  Write-Host "Host.js:        $HostJs"
+}
 Write-Host "Host manifest:  $HostManifestPath"
 
 Add-RegistryStringValue -Key $ExtensionRegKey -Name 'update_url' -Value $UPDATE_URL
@@ -288,7 +321,7 @@ if ($chromeProcesses) {
   Start-Sleep -Seconds 1
 }
 
-Clear-ExternalUninstallBlock -NodePath $NodePath -PrefsPath $TargetPrefs -ExtensionId $EXT_ID
+Clear-ExternalUninstallBlock -PrefsPath $TargetPrefs -ExtensionId $EXT_ID
 Write-Host 'Cleared external uninstall block for:'
 Write-Host "  extension=$EXT_ID"
 Write-Host "  profile=$TargetProfile"
@@ -300,6 +333,8 @@ Install-NativeHost `
   -HostInstallDir $HostInstallDir `
   -HostWrapperPath $HostWrapperPath `
   -HostManifestPath $HostManifestPath `
+  -HostBinarySource $HostBinarySource `
+  -HostBinaryInstallPath $HostBinaryInstallPath `
   -HostName $HOST_NAME `
   -ExtensionId $EXT_ID
 

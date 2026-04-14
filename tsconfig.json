@@ -8,6 +8,7 @@
     "src/protocol/**/*",
     "src/native/**/*",
     "src/native-cli/**/*",
+    "src/sea/**/*",
     "src/sdk/**/*",
     "src/index.ts"
   ],

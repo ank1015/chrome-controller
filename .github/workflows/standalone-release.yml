@@ -1,0 +1,78 @@
+name: standalone-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-latest
+            build_script: build:sea:windows-x64
+            release_dir: dist-sea/release/windows-x64
+            cli_binary: chrome-controller.exe
+            host_binary: chrome-controller-host.exe
+          - target: macos-arm64
+            os: macos-14
+            build_script: build:sea:macos-arm64
+            release_dir: dist-sea/release/macos-arm64
+            cli_binary: chrome-controller
+            host_binary: chrome-controller-host
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Build standalone release
+        run: pnpm ${{ matrix.build_script }}
+
+      - name: Smoke test CLI binary
+        run: ./${{ matrix.release_dir }}/${{ matrix.cli_binary }} help
+        shell: bash
+
+      - name: Smoke test setup help
+        run: ./${{ matrix.release_dir }}/${{ matrix.cli_binary }} setup help
+        shell: bash
+
+      - name: Smoke test native host binary
+        run: |
+          node -e "const { spawn } = require('node:child_process'); const child = spawn(process.argv[1], [], { stdio: ['pipe', 'ignore', 'pipe'] }); let stderr = ''; child.stderr.on('data', (chunk) => { stderr += String(chunk); }); child.on('close', (code) => { if (code !== 0 || !stderr.includes('[host] started')) { console.error(stderr); process.exit(code || 1); } }); child.stdin.end();" "${{ matrix.release_dir }}/${{ matrix.host_binary }}"
+        shell: bash
+
+      - name: Create zip artifact (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path "${{ matrix.release_dir }}\*" -DestinationPath "chrome-controller-${{ matrix.target }}.zip" -Force
+        shell: powershell
+
+      - name: Create zip artifact (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "${{ matrix.release_dir }}" "chrome-controller-${{ matrix.target }}.zip"
+        shell: bash
+
+      - name: Upload standalone artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-controller-${{ matrix.target }}
+          path: chrome-controller-${{ matrix.target }}.zip
