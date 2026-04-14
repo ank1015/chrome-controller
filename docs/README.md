@@ -11,7 +11,7 @@ Use the SDK when you already understand the workflow and want to encode it in co
 
 The recommended reading order is:
 
-1. [`cli.md`](./cli.md) for the session model and the full command surface
+1. [`cli.md`](./cli.md) for setup, the session model, and the full command surface
 2. [`sdk.md`](./sdk.md) for the exported SDK methods, types, and connection model
 3. [`best-practices.md`](./best-practices.md) for guidance on how to use both well
 
@@ -32,3 +32,5 @@ The SDK is intentionally low level:
 - explicit `tabId`-driven automation
 
 If you are unsure which surface to use, start with the CLI. Move to the SDK once the task is stable enough to script.
+
+Before using the CLI for the first time, run `chrome-controller setup` to choose the Chrome profile that should host the extension and native messaging bridge. Setup currently supports macOS and Windows.

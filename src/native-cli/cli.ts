@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 
 import { runSessionCommand } from './commands/session.js';
+import { runSetupCommand } from './commands/setup.js';
 import { runObserveCommand } from './commands/observe.js';
 import { runStateCommand } from './commands/state.js';
 import { runTabsCommand } from './commands/tabs.js';
@@ -58,6 +59,8 @@ export async function runCli(
       browserService,
       sessionStore,
       env: options.env,
+      stdout,
+      stderr,
     });
 
     writeResult(stdout, parsedArgs.json, result);
@@ -77,6 +80,8 @@ async function dispatchCommand(
     explicitSessionId?: string;
     sessionStore: SessionStore;
     env?: NodeJS.ProcessEnv;
+    stdout: CliWritable;
+    stderr: CliWritable;
   }
 ): Promise<CliCommandResult> {
   switch (command) {
@@ -91,6 +96,14 @@ async function dispatchCommand(
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
         browserService: context.browserService ?? new ChromeBrowserService(),
+      });
+    case 'setup':
+      return await runSetupCommand({
+        args,
+        json: context.json,
+        env: context.env,
+        stdout: context.stdout,
+        stderr: context.stderr,
       });
     case 'windows':
       return await runWindowsCommand({
@@ -330,6 +343,7 @@ function createHelpLines(): string[] {
     '  page      Navigate and inspect page state and content',
     '  raw       Advanced escape hatch for raw browser APIs and CDP',
     '  session   Manage CLI sessions',
+    '  setup     Choose a Chrome profile and install the extension/native host',
     '  tabs      Inspect and manage browser tabs',
     '  upload    Upload files through file inputs',
     '  wait      Wait for page and browser conditions',

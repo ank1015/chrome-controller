@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getChromeControllerHome } from './session-store.js';
@@ -39,6 +39,30 @@ export async function readChromeControllerConfig(
   }
 
   return normalizeChromeControllerConfig(parsed, configPath);
+}
+
+export async function writeChromeControllerConfig(
+  config: ChromeControllerConfig,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string> {
+  const configPath = getChromeControllerConfigPath(env);
+  await mkdir(getChromeControllerHome(env), { recursive: true });
+  await writeFile(
+    configPath,
+    `${JSON.stringify(
+      {
+        chrome: {
+          profileDirectory: config.chromeProfileDirectory,
+          ...(config.chromeProfileEmail ? { profileEmail: config.chromeProfileEmail } : {}),
+        },
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+
+  return configPath;
 }
 
 export function normalizeChromeControllerConfig(

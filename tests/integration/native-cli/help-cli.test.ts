@@ -117,6 +117,8 @@ describe('native CLI help text', () => {
     const stateOutcome = await runCliCommand(['state', 'help'], tempHome);
     const rawOutcome = await runCliCommand(['raw', 'help'], tempHome);
     const openOutcome = await runCliCommand(['open', 'help'], tempHome);
+    const setupOutcome = await runCliCommand(['setup', 'help'], tempHome);
+    const rootOutcome = await runCliCommand(['help'], tempHome);
 
     expect(waitOutcome.exitCode).toBe(0);
     expect(waitOutcome.stderr).toBe('');
@@ -157,6 +159,17 @@ describe('native CLI help text', () => {
     expect(openOutcome.stderr).toBe('');
     expect(openOutcome.stdout).toContain(
       'the wait defaults are --timeout-ms 30000 --poll-ms 250 --quiet-ms 500'
+    );
+
+    expect(setupOutcome.exitCode).toBe(0);
+    expect(setupOutcome.stderr).toBe('');
+    expect(setupOutcome.stdout).toContain('chrome-controller setup --profile <name-or-directory>');
+    expect(setupOutcome.stdout).toContain('Setup currently supports macOS and Windows.');
+
+    expect(rootOutcome.exitCode).toBe(0);
+    expect(rootOutcome.stderr).toBe('');
+    expect(rootOutcome.stdout).toContain(
+      'setup     Choose a Chrome profile and install the extension/native host'
     );
   });
 });

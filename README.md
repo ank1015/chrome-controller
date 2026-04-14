@@ -12,6 +12,7 @@ npm install @ank1015/chrome-controller
 
 ```bash
 npx @ank1015/chrome-controller --help
+npx @ank1015/chrome-controller setup
 npx @ank1015/chrome-controller session create --id demo
 npx @ank1015/chrome-controller tabs list --json
 ```

@@ -6,6 +6,7 @@ import {
   getChromeControllerConfigPath,
   normalizeChromeControllerConfig,
   readChromeControllerConfig,
+  writeChromeControllerConfig,
 } from '../../../src/native-cli/config.js';
 
 describe('chrome-controller config', () => {
@@ -67,6 +68,36 @@ describe('chrome-controller config', () => {
     ).toEqual({
       chromeProfileDirectory: 'Profile 2',
       chromeProfileEmail: 'operator@example.com',
+    });
+  });
+
+  it('writes nested chrome profile settings to config.json', async () => {
+    const configPath = await writeChromeControllerConfig(
+      {
+        chromeProfileDirectory: 'Profile 9',
+        chromeProfileEmail: 'profile9@example.com',
+      },
+      {
+        ...process.env,
+        CHROME_CONTROLLER_HOME: tempHome,
+      }
+    );
+
+    expect(configPath).toBe(
+      getChromeControllerConfigPath({
+        ...process.env,
+        CHROME_CONTROLLER_HOME: tempHome,
+      })
+    );
+
+    const config = await readChromeControllerConfig({
+      ...process.env,
+      CHROME_CONTROLLER_HOME: tempHome,
+    });
+
+    expect(config).toEqual({
+      chromeProfileDirectory: 'Profile 9',
+      chromeProfileEmail: 'profile9@example.com',
     });
   });
 });

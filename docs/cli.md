@@ -27,6 +27,7 @@ In most single-session workflows, you do not need `--session`. After `session cr
 
 ```bash
 chrome-controller session ...
+chrome-controller setup ...
 chrome-controller windows ...
 chrome-controller tabs ...
 chrome-controller open <url> ...
@@ -52,6 +53,23 @@ Important defaults:
 - `session reset` recreates the managed window and clears the remembered current tab
 - commands that need the managed window auto-recreate it if it has been closed manually
 - use `--session <id>` when you want to target another session without switching away from the current one
+
+## Setup
+
+Run setup before the first real CLI task, or any time you want to switch the Chrome profile used by the extension/native host bridge.
+
+```bash
+chrome-controller setup
+chrome-controller setup --profile "Profile 1"
+```
+
+Notes:
+
+- setup currently supports macOS and Windows
+- setup lists detected Chrome profiles and lets you choose one interactively
+- the selected profile is stored in `~/.chrome-controller/config.json` or `CHROME_CONTROLLER_HOME/config.json`
+- setup then runs the platform-specific installer script to install the extension, register native messaging, and restart Chrome for that profile
+- if the CLI reports that it cannot connect to the bridge, run `chrome-controller setup` again
 
 ## Session Commands
 

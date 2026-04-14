@@ -17,6 +17,8 @@
   "files": [
     "dist",
     "manifests",
+    "install_ext_and_restart_chrome_mac.sh",
+    "install_ext_and_restart_chrome_windows.ps1",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
