@@ -8,6 +8,7 @@ import type {
   CliDownloadInfo,
   CliDownloadsFilter,
   CliCreateWindowOptions,
+  CliUpdateWindowOptions,
   CliDebuggerEvent,
   CliListTabsOptions,
   CliMoveTabOptions,
@@ -90,11 +91,19 @@ export class ChromeBrowserService implements BrowserService {
     return normalizeWindow(window);
   }
 
+  async updateWindow(
+    _session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): Promise<CliWindowInfo> {
+    const window = await this.callChrome<RawWindow>('windows.update', windowId, options);
+    return normalizeWindow(window);
+  }
+
   async focusWindow(_session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
-    const window = await this.callChrome<RawWindow>('windows.update', windowId, {
+    return await this.updateWindow(_session, windowId, {
       focused: true,
     });
-    return normalizeWindow(window);
   }
 
   async closeWindow(_session: CliSessionRecord, windowId: number): Promise<void> {

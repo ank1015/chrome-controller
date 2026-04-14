@@ -184,87 +184,84 @@ chrome-controller tabs target clear --session research
 
 ## Windows
 
-Use window commands when you need to inspect or arrange Chrome windows.
+Use window commands to inspect or arrange the active session's managed window.
 
-Because sessions are not browser-isolated, `windows` and `tabs` are often the safest place to start. Inspect the real browser state first, then choose exactly which tab to control.
+If the managed window is missing because the user closed it or Chrome restarted, the CLI recreates it automatically before running the command.
 
-### `windows list`
+### `windows info`
 
-List all windows.
-
-Typical use:
-
-- see how many windows are open
-- get a `windowId` before moving tabs or focusing a window
+Return details for the managed session window.
 
 Example:
 
 ```bash
-chrome-controller windows list --json
+chrome-controller windows info --json
 ```
 
-### `windows current`
+### `windows focus`
 
-Return the current window.
+Focus the managed session window.
 
 Example:
 
 ```bash
-chrome-controller windows current --json
+chrome-controller windows focus
 ```
 
-### `windows get <id>`
+### `windows resize <width> <height>`
 
-Return details for one window.
+Resize the managed session window.
+
+If the window is minimized, maximized, or fullscreen, the CLI restores it to the normal state first and then applies the new size.
 
 Example:
 
 ```bash
-chrome-controller windows get 123 --json
+chrome-controller windows resize 1400 900
 ```
 
-### `windows create`
+### `windows move <left> <top>`
 
-Open a new Chrome window.
+Move the managed session window.
 
-Options:
-
-- `--url <url>`: open the window with a specific page
-- `--focused`: focus the new window
-- `--incognito`: open it in incognito mode
-- `--type <type>`: set the window type
-- `--state <state>`: set the window state like `normal`, `maximized`, `minimized`, or `fullscreen`
-- `--left <n>`: left screen position
-- `--top <n>`: top screen position
-- `--width <n>`: width in pixels
-- `--height <n>`: height in pixels
-
-Examples:
-
-```bash
-chrome-controller windows create --url https://example.com --focused
-chrome-controller windows create --state maximized
-chrome-controller windows create --left 0 --top 0 --width 1400 --height 900
-```
-
-### `windows focus <id>`
-
-Focus a window.
+If the window is minimized, maximized, or fullscreen, the CLI restores it to the normal state first and then applies the new position.
 
 Example:
 
 ```bash
-chrome-controller windows focus 123
+chrome-controller windows move 0 32
 ```
 
-### `windows close <id>`
+### `windows maximize`
 
-Close a window.
+Maximize the managed session window.
 
 Example:
 
 ```bash
-chrome-controller windows close 123
+chrome-controller windows maximize
+```
+
+### `windows minimize`
+
+Minimize the managed session window.
+
+Example:
+
+```bash
+chrome-controller windows minimize
+```
+
+### `windows restore`
+
+Restore the managed session window to the normal state.
+
+Use this after `windows minimize`, `windows maximize`, or when Chrome has the window in fullscreen and you want the normal resizable bounds back.
+
+Example:
+
+```bash
+chrome-controller windows restore
 ```
 
 ## Tabs
@@ -516,7 +513,7 @@ chrome-controller tabs ungroup 456 457
 
 ```bash
 chrome-controller session create --id research
-chrome-controller windows current --json
+chrome-controller windows info --json
 chrome-controller tabs open https://example.com --active
 chrome-controller tabs list
 ```
@@ -530,10 +527,11 @@ chrome-controller tabs move 504 --index 0
 chrome-controller tabs pin 504
 ```
 
-### Split work across windows
+### Arrange the managed session window
 
 ```bash
-chrome-controller windows create --url https://news.ycombinator.com --focused
-chrome-controller windows list --json
-chrome-controller tabs move 456 --window 123 --index 0
+chrome-controller session create --id layout-demo
+chrome-controller windows move 40 40
+chrome-controller windows resize 1440 960
+chrome-controller windows focus
 ```

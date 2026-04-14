@@ -26,6 +26,74 @@ describe('ChromeBrowserService managed session windows', () => {
     connectManagedChromeBridgeMock.mockReset();
   });
 
+  it('updates window bounds and state through the Chrome windows API', async () => {
+    const call = vi.fn(async (method: string, ...args: unknown[]) => {
+      if (method === 'windows.update') {
+        expect(args).toEqual([
+          11,
+          {
+            state: 'normal',
+            left: 10,
+            top: 20,
+            width: 1280,
+            height: 900,
+          },
+        ]);
+
+        return {
+          id: 11,
+          focused: false,
+          incognito: false,
+          state: 'normal',
+          type: 'normal',
+          tabs: [],
+          left: 10,
+          top: 20,
+          width: 1280,
+          height: 900,
+        };
+      }
+
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const close = vi.fn(async () => {});
+
+    connectManagedChromeBridgeMock.mockResolvedValue({
+      launched: false,
+      client: {
+        call,
+        subscribe: vi.fn(() => () => {}),
+      },
+      close,
+    });
+
+    const window = await new ChromeBrowserService().updateWindow(createSession(), 11, {
+      state: 'normal',
+      left: 10,
+      top: 20,
+      width: 1280,
+      height: 900,
+    });
+
+    expect(window).toEqual({
+      id: 11,
+      focused: false,
+      incognito: false,
+      state: 'normal',
+      type: 'normal',
+      tabCount: 0,
+      tabs: [],
+      activeTab: null,
+      bounds: {
+        left: 10,
+        top: 20,
+        width: 1280,
+        height: 900,
+      },
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('adopts a safe auto-launched startup window instead of opening a second one', async () => {
     const call = vi.fn(async (method: string) => {
       if (method === 'windows.getAll') {

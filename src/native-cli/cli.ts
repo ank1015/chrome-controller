@@ -380,7 +380,7 @@ function createHelpLines(): string[] {
     '  tabs      Inspect and manage browser tabs',
     '  upload    Upload files through file inputs',
     '  wait      Wait for page and browser conditions',
-    '  windows   Inspect and manage browser windows',
+    '  windows   Manage the active session window',
     '  help      Show this help',
     '',
     'Global options:',

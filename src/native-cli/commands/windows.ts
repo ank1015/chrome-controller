@@ -1,9 +1,7 @@
 import type {
   BrowserService,
   CliCommandResult,
-  CliCreateWindowOptions,
   CliSessionRecord,
-  CliWindowTabInfo,
   CliWindowInfo,
 } from '../types.js';
 import { SessionStore } from '../session-store.js';
@@ -16,33 +14,32 @@ interface WindowsCommandOptions {
   browserService: BrowserService;
 }
 
-interface CliWindowListItem {
-  id: number | null;
-  focused: boolean;
-  state: string | null;
-  type: string | null;
-  tabCount: number;
-  tabs: CliWindowTabInfo[];
+interface ManagedWindowResolution {
+  session: CliSessionRecord;
+  windowId: number;
 }
 
 export async function runWindowsCommand(
   options: WindowsCommandOptions
 ): Promise<CliCommandResult> {
-  const [subcommand = 'list', ...rest] = options.args;
+  const [subcommand = 'info', ...rest] = options.args;
 
   switch (subcommand) {
-    case 'list':
-      return await runListWindowsCommand(options);
+    case 'info':
     case 'current':
-      return await runCurrentWindowCommand(options);
-    case 'get':
-      return await runGetWindowCommand(rest, options);
-    case 'create':
-      return await runCreateWindowCommand(rest, options);
+      return await runWindowInfoCommand(rest, options);
     case 'focus':
       return await runFocusWindowCommand(rest, options);
-    case 'close':
-      return await runCloseWindowCommand(rest, options);
+    case 'resize':
+      return await runResizeWindowCommand(rest, options);
+    case 'move':
+      return await runMoveWindowCommand(rest, options);
+    case 'maximize':
+      return await runWindowStateCommand(rest, options, 'maximized', 'Maximized');
+    case 'minimize':
+      return await runWindowStateCommand(rest, options, 'minimized', 'Minimized');
+    case 'restore':
+      return await runWindowStateCommand(rest, options, 'normal', 'Restored');
     case 'help':
     case '--help':
     case '-h':
@@ -54,44 +51,12 @@ export async function runWindowsCommand(
   }
 }
 
-async function runListWindowsCommand(
-  options: WindowsCommandOptions
-): Promise<CliCommandResult> {
-  const session = await resolveSession(options);
-  const windows = await options.browserService.listWindows(session);
-  const summaries = windows.map((window) => toWindowListItem(window));
-
-  return {
-    session,
-    data: {
-      windows: summaries,
-      count: summaries.length,
-    },
-    lines: createWindowListLines(windows),
-  };
-}
-
-async function runCurrentWindowCommand(
-  options: WindowsCommandOptions
-): Promise<CliCommandResult> {
-  const session = await resolveSession(options);
-  const window = await options.browserService.getCurrentWindow(session);
-
-  return {
-    session,
-    data: {
-      window,
-    },
-    lines: createWindowDetailLines(window),
-  };
-}
-
-async function runGetWindowCommand(
+async function runWindowInfoCommand(
   args: string[],
   options: WindowsCommandOptions
 ): Promise<CliCommandResult> {
-  const windowId = readRequiredWindowId(args[0], 'get');
-  const session = await resolveSession(options);
+  ensureNoArgs(args, 'info');
+  const { session, windowId } = await resolveSessionWindow(options);
   const window = await options.browserService.getWindow(session, windowId);
 
   return {
@@ -103,56 +68,68 @@ async function runGetWindowCommand(
   };
 }
 
-async function runCreateWindowCommand(
-  args: string[],
-  options: WindowsCommandOptions
-): Promise<CliCommandResult> {
-  const createOptions = parseCreateWindowOptions(args);
-  const session = await resolveSession(options);
-  const window = await options.browserService.createWindow(session, createOptions);
-
-  return {
-    session,
-    data: {
-      window,
-    },
-    lines: [formatWindowActionLine('Created', window)],
-  };
-}
-
 async function runFocusWindowCommand(
   args: string[],
   options: WindowsCommandOptions
 ): Promise<CliCommandResult> {
-  const windowId = readRequiredWindowId(args[0], 'focus');
-  const session = await resolveSession(options);
+  ensureNoArgs(args, 'focus');
+  const { session, windowId } = await resolveSessionWindow(options);
   const window = await options.browserService.focusWindow(session, windowId);
 
-  return {
-    session,
-    data: {
-      window,
-    },
-    lines: [formatWindowActionLine('Focused', window)],
-  };
+  return createWindowActionResult(session, window, 'Focused');
 }
 
-async function runCloseWindowCommand(
+async function runResizeWindowCommand(
   args: string[],
   options: WindowsCommandOptions
 ): Promise<CliCommandResult> {
-  const windowId = readRequiredWindowId(args[0], 'close');
-  const session = await resolveSession(options);
-  await options.browserService.closeWindow(session, windowId);
+  const width = parseRequiredPositiveIntegerArg(args[0], 'width', 'resize <width> <height>');
+  const height = parseRequiredPositiveIntegerArg(args[1], 'height', 'resize <width> <height>');
+  ensureNoArgs(args.slice(2), 'resize <width> <height>');
 
-  return {
-    session,
-    data: {
-      closed: true,
-      windowId,
-    },
-    lines: [`Closed window ${windowId}`],
-  };
+  const { session, windowId } = await resolveSessionWindow(options);
+  const window = await updateManagedWindowBounds(options.browserService, session, windowId, {
+    width,
+    height,
+  });
+
+  return createWindowActionResult(session, window, 'Resized', {
+    includeBounds: true,
+  });
+}
+
+async function runMoveWindowCommand(
+  args: string[],
+  options: WindowsCommandOptions
+): Promise<CliCommandResult> {
+  const left = parseRequiredIntegerArg(args[0], 'left', 'move <left> <top>');
+  const top = parseRequiredIntegerArg(args[1], 'top', 'move <left> <top>');
+  ensureNoArgs(args.slice(2), 'move <left> <top>');
+
+  const { session, windowId } = await resolveSessionWindow(options);
+  const window = await updateManagedWindowBounds(options.browserService, session, windowId, {
+    left,
+    top,
+  });
+
+  return createWindowActionResult(session, window, 'Moved', {
+    includeBounds: true,
+  });
+}
+
+async function runWindowStateCommand(
+  args: string[],
+  options: WindowsCommandOptions,
+  state: 'maximized' | 'minimized' | 'normal',
+  action: 'Maximized' | 'Minimized' | 'Restored'
+): Promise<CliCommandResult> {
+  ensureNoArgs(args, action.toLowerCase());
+  const { session, windowId } = await resolveSessionWindow(options);
+  const window = await options.browserService.updateWindow(session, windowId, {
+    state,
+  });
+
+  return createWindowActionResult(session, window, action);
 }
 
 async function resolveSession(options: WindowsCommandOptions): Promise<CliSessionRecord> {
@@ -163,192 +140,76 @@ async function resolveSession(options: WindowsCommandOptions): Promise<CliSessio
   );
 }
 
-function parseCreateWindowOptions(args: string[]): CliCreateWindowOptions {
-  const createOptions: CliCreateWindowOptions = {};
-  const urls: string[] = [];
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--url') {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error('Missing value for --url');
-      }
-      urls.push(value);
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--url=')) {
-      urls.push(arg.slice('--url='.length));
-      continue;
-    }
-
-    if (arg === '--type') {
-      createOptions.type = readRequiredOptionValue(args, index, '--type');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--type=')) {
-      createOptions.type = arg.slice('--type='.length);
-      continue;
-    }
-
-    if (arg === '--state') {
-      createOptions.state = readRequiredOptionValue(args, index, '--state');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--state=')) {
-      createOptions.state = arg.slice('--state='.length);
-      continue;
-    }
-
-    if (arg === '--focused' || arg.startsWith('--focused=')) {
-      const { value, consumedNextArgument } = readBooleanFlag(args, index, '--focused');
-      createOptions.focused = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--incognito' || arg.startsWith('--incognito=')) {
-      const { value, consumedNextArgument } = readBooleanFlag(args, index, '--incognito');
-      createOptions.incognito = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--left' || arg.startsWith('--left=')) {
-      const { value, consumedNextArgument } = readIntegerFlag(args, index, '--left');
-      createOptions.left = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--top' || arg.startsWith('--top=')) {
-      const { value, consumedNextArgument } = readIntegerFlag(args, index, '--top');
-      createOptions.top = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--width' || arg.startsWith('--width=')) {
-      const { value, consumedNextArgument } = readIntegerFlag(args, index, '--width');
-      createOptions.width = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--height' || arg.startsWith('--height=')) {
-      const { value, consumedNextArgument } = readIntegerFlag(args, index, '--height');
-      createOptions.height = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    throw new Error(`Unknown option for windows create: ${arg}`);
+async function resolveSessionWindow(
+  options: WindowsCommandOptions
+): Promise<ManagedWindowResolution> {
+  const session = await resolveSession(options);
+  if (typeof session.windowId !== 'number') {
+    throw new Error(`Could not resolve a managed window for session ${session.id}`);
   }
 
-  if (urls.length === 1) {
-    createOptions.url = urls[0];
-  } else if (urls.length > 1) {
-    createOptions.url = urls;
-  }
-
-  return createOptions;
+  return {
+    session,
+    windowId: session.windowId,
+  };
 }
 
-function readRequiredWindowId(rawValue: string | undefined, commandName: string): number {
+async function updateManagedWindowBounds(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  windowId: number,
+  bounds: {
+    left?: number;
+    top?: number;
+    width?: number;
+    height?: number;
+  }
+): Promise<CliWindowInfo> {
+  const window = await browserService.getWindow(session, windowId);
+  if (window.state && window.state !== 'normal') {
+    await browserService.updateWindow(session, windowId, {
+      state: 'normal',
+    });
+  }
+
+  return await browserService.updateWindow(session, windowId, bounds);
+}
+
+function ensureNoArgs(args: string[], usage: string): void {
+  if (args.length > 0) {
+    throw new Error(`Usage: chrome-controller windows ${usage}`);
+  }
+}
+
+function parseRequiredPositiveIntegerArg(
+  rawValue: string | undefined,
+  name: string,
+  usage: string
+): number {
   if (!rawValue) {
-    throw new Error(`Missing window id. Usage: chrome-controller windows ${commandName} <id>`);
+    throw new Error(`Usage: chrome-controller windows ${usage}`);
   }
 
   const value = Number(rawValue);
   if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`Invalid window id: ${rawValue}`);
+    throw new Error(`Invalid ${name} value: ${rawValue}`);
   }
 
   return value;
 }
 
-function readRequiredOptionValue(args: string[], index: number, flagName: string): string {
-  const value = args[index + 1];
-  if (!value) {
-    throw new Error(`Missing value for ${flagName}`);
+function parseRequiredIntegerArg(
+  rawValue: string | undefined,
+  name: string,
+  usage: string
+): number {
+  if (!rawValue) {
+    throw new Error(`Usage: chrome-controller windows ${usage}`);
   }
 
-  return value;
-}
-
-function readBooleanFlag(
-  args: string[],
-  index: number,
-  flagName: string
-): { value: boolean; consumedNextArgument: boolean } {
-  const arg = args[index];
-  if (arg.startsWith(`${flagName}=`)) {
-    return {
-      value: parseBoolean(arg.slice(flagName.length + 1), flagName),
-      consumedNextArgument: false,
-    };
-  }
-
-  const nextValue = args[index + 1];
-  if (nextValue === 'true' || nextValue === 'false') {
-    return {
-      value: parseBoolean(nextValue, flagName),
-      consumedNextArgument: true,
-    };
-  }
-
-  return {
-    value: true,
-    consumedNextArgument: false,
-  };
-}
-
-function readIntegerFlag(
-  args: string[],
-  index: number,
-  flagName: string
-): { value: number; consumedNextArgument: boolean } {
-  const arg = args[index];
-  if (arg.startsWith(`${flagName}=`)) {
-    return {
-      value: parseInteger(arg.slice(flagName.length + 1), flagName),
-      consumedNextArgument: false,
-    };
-  }
-
-  const nextValue = args[index + 1];
-  if (!nextValue) {
-    throw new Error(`Missing value for ${flagName}`);
-  }
-
-  return {
-    value: parseInteger(nextValue, flagName),
-    consumedNextArgument: true,
-  };
-}
-
-function parseBoolean(rawValue: string, flagName: string): boolean {
-  if (rawValue === 'true') {
-    return true;
-  }
-  if (rawValue === 'false') {
-    return false;
-  }
-
-  throw new Error(`Invalid boolean value for ${flagName}: ${rawValue}`);
-}
-
-function parseInteger(rawValue: string, flagName: string): number {
   const value = Number(rawValue);
   if (!Number.isInteger(value)) {
-    throw new Error(`Invalid integer value for ${flagName}: ${rawValue}`);
+    throw new Error(`Invalid ${name} value: ${rawValue}`);
   }
 
   return value;
@@ -358,43 +219,20 @@ function createWindowsHelpLines(): string[] {
   return [
     'Windows commands',
     '',
+    "All windows commands act on the active session's managed window.",
+    'If that managed window is missing, it is recreated automatically.',
+    '',
     'Usage:',
-    '  chrome-controller windows list',
-    '  chrome-controller windows current',
-    '  chrome-controller windows get <id>',
-    '  chrome-controller windows create [--url <url>] [--focused] [--incognito]',
-    '  chrome-controller windows create [--type <type>] [--state <state>]',
-    '  chrome-controller windows create [--left <n>] [--top <n>] [--width <n>] [--height <n>]',
-    '  chrome-controller windows focus <id>',
-    '  chrome-controller windows close <id>',
+    '  chrome-controller windows info',
+    '  chrome-controller windows focus',
+    '  chrome-controller windows resize <width> <height>',
+    '  chrome-controller windows move <left> <top>',
+    '  chrome-controller windows maximize',
+    '  chrome-controller windows minimize',
+    '  chrome-controller windows restore',
+    '',
+    'Restore returns a minimized, maximized, or fullscreen managed window to the normal state.',
   ];
-}
-
-function createWindowListLines(windows: CliWindowInfo[]): string[] {
-  if (windows.length === 0) {
-    return ['No windows found'];
-  }
-
-  const lines = ['Windows'];
-  for (const window of windows) {
-    const activeTabUrl = window.activeTab?.url ?? 'none';
-    lines.push(
-      `${window.focused ? '*' : ' '} ${formatWindowId(window)}  state=${window.state ?? 'unknown'}  type=${window.type ?? 'unknown'}  tabs=${window.tabCount}  active=${activeTabUrl}`
-    );
-  }
-
-  return lines;
-}
-
-function toWindowListItem(window: CliWindowInfo): CliWindowListItem {
-  return {
-    id: window.id,
-    focused: window.focused,
-    state: window.state,
-    type: window.type,
-    tabCount: window.tabCount,
-    tabs: window.tabs,
-  };
 }
 
 function createWindowDetailLines(window: CliWindowInfo): string[] {
@@ -414,7 +252,30 @@ function formatWindowId(window: CliWindowInfo): string {
   return typeof window.id === 'number' ? String(window.id) : 'unknown';
 }
 
-function formatWindowActionLine(action: string, window: CliWindowInfo): string {
+function createWindowActionResult(
+  session: CliSessionRecord,
+  window: CliWindowInfo,
+  action: string,
+  options: {
+    includeBounds?: boolean;
+  } = {}
+): CliCommandResult {
+  return {
+    session,
+    data: {
+      window,
+    },
+    lines: [formatWindowActionLine(action, window, options)],
+  };
+}
+
+function formatWindowActionLine(
+  action: string,
+  window: CliWindowInfo,
+  options: {
+    includeBounds?: boolean;
+  } = {}
+): string {
   const parts = [`${action} window ${formatWindowId(window)}`];
 
   if (window.state) {
@@ -425,12 +286,11 @@ function formatWindowActionLine(action: string, window: CliWindowInfo): string {
     parts.push('focused');
   }
 
-  if (window.activeTab?.id !== null && window.activeTab?.id !== undefined) {
-    parts.push(`activeTab=${window.activeTab.id}`);
-  }
-
-  if (window.activeTab?.url) {
-    parts.push(window.activeTab.url);
+  if (options.includeBounds) {
+    parts.push(`left=${window.bounds.left ?? 'unknown'}`);
+    parts.push(`top=${window.bounds.top ?? 'unknown'}`);
+    parts.push(`width=${window.bounds.width ?? 'unknown'}`);
+    parts.push(`height=${window.bounds.height ?? 'unknown'}`);
   }
 
   return parts.join(' ');

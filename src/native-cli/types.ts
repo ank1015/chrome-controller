@@ -140,6 +140,15 @@ export interface CliCreateWindowOptions {
   height?: number;
 }
 
+export interface CliUpdateWindowOptions {
+  focused?: boolean;
+  state?: string;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+}
+
 export interface CliListTabsOptions {
   windowId?: number;
   currentWindow?: boolean;
@@ -169,6 +178,11 @@ export interface BrowserService {
   createWindow(
     session: CliSessionRecord,
     options?: CliCreateWindowOptions
+  ): Promise<CliWindowInfo>;
+  updateWindow(
+    session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
   ): Promise<CliWindowInfo>;
   focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo>;
   closeWindow(session: CliSessionRecord, windowId: number): Promise<void>;

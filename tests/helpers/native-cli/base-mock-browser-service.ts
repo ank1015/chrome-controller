@@ -6,6 +6,7 @@ import type {
   CliDebuggerEvent,
   CliDownloadInfo,
   CliDownloadsFilter,
+  CliUpdateWindowOptions,
   CliListTabsOptions,
   CliMoveTabOptions,
   CliOpenTabOptions,
@@ -91,6 +92,23 @@ export abstract class BaseMockBrowserService implements BrowserService {
     return cloneWindow(window);
   }
 
+  async updateWindow(
+    session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): Promise<CliWindowInfo> {
+    this.calls.push({
+      method: 'updateWindow',
+      sessionId: session.id,
+      payload: {
+        windowId,
+        options,
+      },
+    });
+
+    return this.applyWindowUpdate(windowId, options);
+  }
+
   async focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
     this.calls.push({
       method: 'focusWindow',
@@ -98,16 +116,9 @@ export abstract class BaseMockBrowserService implements BrowserService {
       payload: windowId,
     });
 
-    const window = this.windows.get(windowId);
-    if (!window) {
-      throw new Error(`Missing window ${windowId}`);
-    }
-
-    for (const candidate of this.windows.values()) {
-      candidate.focused = candidate.id === windowId;
-    }
-
-    return cloneWindow(window);
+    return this.applyWindowUpdate(windowId, {
+      focused: true,
+    });
   }
 
   async closeWindow(session: CliSessionRecord, windowId: number): Promise<void> {
@@ -399,6 +410,46 @@ export abstract class BaseMockBrowserService implements BrowserService {
 
   protected unsupported(method: string): Error {
     return new Error(`${method} is not used in this test`);
+  }
+
+  private applyWindowUpdate(
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): CliWindowInfo {
+    const window = this.windows.get(windowId);
+    if (!window) {
+      throw new Error(`Missing window ${windowId}`);
+    }
+
+    if (options.focused === true) {
+      for (const candidate of this.windows.values()) {
+        candidate.focused = candidate.id === windowId;
+      }
+    } else if (options.focused === false) {
+      window.focused = false;
+    }
+
+    if (typeof options.state === 'string') {
+      window.state = options.state;
+    }
+
+    if (typeof options.left === 'number') {
+      window.bounds.left = options.left;
+    }
+
+    if (typeof options.top === 'number') {
+      window.bounds.top = options.top;
+    }
+
+    if (typeof options.width === 'number') {
+      window.bounds.width = options.width;
+    }
+
+    if (typeof options.height === 'number') {
+      window.bounds.height = options.height;
+    }
+
+    return cloneWindow(window);
   }
 }
 
