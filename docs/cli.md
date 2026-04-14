@@ -17,9 +17,11 @@ The CLI is the opinionated surface for controlling Chrome through this project.
 These flags work with normal CLI commands:
 
 - `--json`
-- `--session <id>`
+- `--session <id>` to override the active session for a single command
 - `--help`
 - `-h`
+
+In most single-session workflows, you do not need `--session`. After `session create` or `session use`, that session is already active.
 
 ## Top-Level Commands
 
@@ -44,10 +46,12 @@ chrome-controller raw ...
 Important defaults:
 
 - `session create` creates a new managed window
+- `session create` also makes the new session active immediately
 - `session use` switches the current session
 - `session close` removes the session and closes its managed window when possible
 - `session reset` recreates the managed window and clears the remembered current tab
 - commands that need the managed window auto-recreate it if it has been closed manually
+- use `--session <id>` when you want to target another session without switching away from the current one
 
 ## Session Commands
 
@@ -59,6 +63,21 @@ chrome-controller session list
 chrome-controller session use <id>
 chrome-controller session close [<id>]
 chrome-controller session reset [<id>]
+```
+
+Examples:
+
+```bash
+chrome-controller session create --id gmail-task
+chrome-controller open https://mail.google.com
+chrome-controller page text --find "top 3 inbox messages"
+```
+
+```bash
+chrome-controller session create --id agent-a
+chrome-controller session create --id agent-b
+chrome-controller page title --session agent-a
+chrome-controller page title --session agent-b
 ```
 
 ## Window Commands
@@ -112,6 +131,8 @@ Notes:
 - pins that tab as the session's current tab
 - defaults to `--active=false`
 - `--ready` waits for stable page readiness
+- when you use `--ready`, the default wait tuning is `--timeout-ms 30000 --poll-ms 250 --quiet-ms 500`
+- only override those wait flags for unusually slow pages, very noisy apps, or debugging
 
 ## Page Commands
 
@@ -119,11 +140,11 @@ All page commands act on the active session's current tab.
 
 ```bash
 chrome-controller page goto <url>
+chrome-controller page back
 chrome-controller page url
 chrome-controller page title
-chrome-controller page text
-chrome-controller page snapshot
-chrome-controller page find <query> [--limit <n>]
+chrome-controller page text [--find <query> [--limit <n>]]
+chrome-controller page snapshot [--find <query>] [--limit <n>]
 chrome-controller page eval <code> [--await-promise] [--user-gesture]
 chrome-controller page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size]
 chrome-controller page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]
@@ -131,11 +152,24 @@ chrome-controller page screenshot [path] [--format <png|jpeg|webp>] [--quality <
 
 Notes:
 
+- `page back` goes to the previous browser history entry for the current tab
 - `page snapshot` captures the interactive structure used for `@eN` refs
-- `page find` is the semantic narrowing command
+- add `--find "<query>"` to `page text` when you want filtered relevant text instead of the full page markdown
+- add `--find "<query>"` to `page snapshot` when you want a filtered shortlist of relevant `@eN` elements instead of the full interactive snapshot
+- on raw `page snapshot`, `--limit` caps how many visible elements are shown
+- `--find` is semantic narrowing, not an exact query language. It tries to return the most useful relevant candidates for the task.
+- when you need precise interactive targets, prefer `page snapshot --find ...`; when you need readable content, prefer `page text --find ...`
 - `page eval` runs JavaScript in the current tab
 - when no PDF path is given, output goes under `CHROME_CONTROLLER_HOME/artifacts/pdfs`
 - when no screenshot path is given, output goes under `CHROME_CONTROLLER_HOME/artifacts/screenshots`
+
+Examples:
+
+```bash
+chrome-controller page text --find "top 3 inbox messages or unread mail summaries"
+chrome-controller page snapshot --find "compose related or send related"
+chrome-controller page back
+```
 
 ## Element Commands
 
@@ -144,7 +178,7 @@ All element commands act on the active session's current tab.
 Targets can be CSS selectors or snapshot refs like `@e1`.
 
 ```bash
-chrome-controller element click <selector|@ref>
+chrome-controller element click <selector|@ref> [--new-tab] [--retry-stale]
 chrome-controller element fill <selector|@ref> <value>
 chrome-controller element type <selector|@ref> <value> [--delay-ms <n>]
 chrome-controller element press <selector|@ref> <key> [--count <n>]
@@ -155,7 +189,9 @@ chrome-controller element uncheck <selector|@ref>
 
 Note:
 
+- add `--new-tab` to open a link in a background tab. It uses Command-click on macOS and Ctrl-click elsewhere
 - add `--retry-stale` to retry transient detached or re-render races on dynamic pages
+- for form or search submission, prefer `element press <field> Enter` over a global `keyboard press Enter`
 
 ## Keyboard Commands
 
@@ -167,6 +203,11 @@ chrome-controller keyboard type <text> [--delay-ms <n>]
 chrome-controller keyboard down <key>
 chrome-controller keyboard up <key>
 ```
+
+Note:
+
+- `keyboard press` sends keys to the current page generally
+- when Enter should apply to a specific search box or form field, prefer `element press <selector|@ref> Enter`
 
 ## Mouse Commands
 
@@ -203,6 +244,11 @@ chrome-controller wait idle <ms>
 chrome-controller wait fn <expression> [--await-promise] [--timeout-ms <n>] [--poll-ms <n>]
 chrome-controller wait download [downloads wait options]
 ```
+
+Notes:
+
+- `wait stable` already defaults to `--timeout-ms 30000 --poll-ms 250 --quiet-ms 500`
+- in the common case, start with `chrome-controller wait stable` and only add flags when the app is unusually slow or noisy
 
 ## Observe Commands
 

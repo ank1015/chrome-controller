@@ -68,8 +68,21 @@ describe('native CLI help text', () => {
     expect(outcome.stdout).toContain(
       'Use `tabs use <tabId>` to switch which tab page commands operate on.'
     );
-    expect(outcome.stdout).toContain('chrome-controller page find <query> [--limit <n>]');
+    expect(outcome.stdout).toContain(
+      'chrome-controller page text [--find <query> [--limit <n>]]'
+    );
+    expect(outcome.stdout).toContain(
+      'chrome-controller page snapshot [--find <query>] [--limit <n>]'
+    );
+    expect(outcome.stdout).toContain('chrome-controller page back');
     expect(outcome.stdout).toContain('chrome-controller page screenshot');
+    expect(outcome.stdout).toContain(
+      'Add `--find "<query>"` to `page text` or `page snapshot`'
+    );
+    expect(outcome.stdout).toContain(
+      'For raw `page snapshot` output, `--limit` caps how many visible elements are shown.'
+    );
+    expect(outcome.stdout).not.toContain('chrome-controller page find <query> [--limit <n>]');
     expect(outcome.stdout).not.toContain(
       "When --tab is omitted, the session's current tab is used first."
     );
@@ -87,7 +100,13 @@ describe('native CLI help text', () => {
       'Use `tabs use <tabId>` to switch which tab element commands operate on.'
     );
     expect(outcome.stdout).toContain(
+      'chrome-controller element click <selector|@ref> [--new-tab] [--retry-stale]'
+    );
+    expect(outcome.stdout).toContain(
       'chrome-controller element press <selector|@ref> <key> [--count <n>]'
+    );
+    expect(outcome.stdout).toContain(
+      'Add --new-tab to open a link in a background tab.'
     );
     expect(outcome.stdout).not.toContain('[--tab <id>]');
   });
@@ -97,6 +116,7 @@ describe('native CLI help text', () => {
     const observeOutcome = await runCliCommand(['observe', 'help'], tempHome);
     const stateOutcome = await runCliCommand(['state', 'help'], tempHome);
     const rawOutcome = await runCliCommand(['raw', 'help'], tempHome);
+    const openOutcome = await runCliCommand(['open', 'help'], tempHome);
 
     expect(waitOutcome.exitCode).toBe(0);
     expect(waitOutcome.stderr).toBe('');
@@ -104,6 +124,9 @@ describe('native CLI help text', () => {
       "All wait commands except `wait idle` act on the active session's current tab."
     );
     expect(waitOutcome.stdout).toContain('chrome-controller wait idle <ms>');
+    expect(waitOutcome.stdout).toContain(
+      'wait stable defaults to --timeout-ms 30000 --poll-ms 250 --quiet-ms 500'
+    );
     expect(waitOutcome.stdout).not.toContain('[--tab <id>]');
 
     expect(observeOutcome.exitCode).toBe(0);
@@ -129,5 +152,11 @@ describe('native CLI help text', () => {
     );
     expect(rawOutcome.stdout).toContain('chrome-controller raw browser <method> [argsJson]');
     expect(rawOutcome.stdout).toContain('chrome-controller raw cdp <method> [paramsJson]');
+
+    expect(openOutcome.exitCode).toBe(0);
+    expect(openOutcome.stderr).toBe('');
+    expect(openOutcome.stdout).toContain(
+      'the wait defaults are --timeout-ms 30000 --poll-ms 250 --quiet-ms 500'
+    );
   });
 });

@@ -19,7 +19,9 @@ The CLI is opinionated:
 
 - a session owns one managed Chrome window
 - if that managed window disappears, the CLI recreates it automatically
+- `session create` and `session use` set the active session for later commands
 - most commands act on the active session's current tab
+- `--session <id>` is mainly for multi-session work when you want to target another session without switching the active one
 - `raw` is the explicit escape hatch
 
 The SDK is intentionally low level:

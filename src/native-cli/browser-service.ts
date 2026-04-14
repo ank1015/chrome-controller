@@ -1,4 +1,5 @@
-import { resolve as resolvePath } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, extname, resolve as resolvePath } from 'node:path';
 import { connectManagedChromeBridge } from './bridge.js';
 
 import type {
@@ -96,16 +97,16 @@ export class ChromeBrowserService implements BrowserService {
   }
 
   async updateWindow(
-    _session: CliSessionRecord,
+    session: CliSessionRecord,
     windowId: number,
     options: CliUpdateWindowOptions
   ): Promise<CliWindowInfo> {
-    const window = await this.callChrome<RawWindow>('windows.update', windowId, options);
-    return normalizeWindow(window);
+    await this.callChrome<RawWindow>('windows.update', windowId, options);
+    return await this.getWindow(session, windowId);
   }
 
-  async focusWindow(_session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
-    return await this.updateWindow(_session, windowId, {
+  async focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
+    return await this.updateWindow(session, windowId, {
       focused: true,
     });
   }
@@ -571,10 +572,35 @@ export class ChromeBrowserService implements BrowserService {
         throw new Error(`Could not resolve file input node for selector: ${selector}`);
       }
 
-      await this.sendDebuggerCommand(session, tabId, 'DOM.setFileInputFiles', {
-        nodeId: node.nodeId,
-        files,
-      });
+      try {
+        await this.sendDebuggerCommand(session, tabId, 'DOM.setFileInputFiles', {
+          nodeId: node.nodeId,
+          files,
+        });
+      } catch (error) {
+        if (!shouldFallbackToSyntheticUpload(error)) {
+          throw error;
+        }
+
+        const syntheticFiles = await readSyntheticUploadFiles(files);
+        const fallbackResult = await this.evaluateOnTab<{
+          assignedCount?: number;
+          names?: string[];
+        }>(
+          tabId,
+          buildSyntheticFileUploadCode(selector, syntheticFiles),
+          {
+            awaitPromise: true,
+            userGesture: true,
+          }
+        );
+
+        if (fallbackResult?.assignedCount !== files.length) {
+          throw new Error(
+            `Synthetic upload fallback assigned ${fallbackResult?.assignedCount ?? 0}/${files.length} files for selector: ${selector}`
+          );
+        }
+      }
     } finally {
       if (!attachResult.alreadyAttached) {
         await this.detachDebugger(session, tabId);
@@ -894,6 +920,101 @@ function normalizeBounds(window: RawWindow): CliWindowBounds {
     width: typeof window.width === 'number' ? window.width : null,
     height: typeof window.height === 'number' ? window.height : null,
   };
+}
+
+interface SyntheticUploadFile {
+  name: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+async function readSyntheticUploadFiles(files: string[]): Promise<SyntheticUploadFile[]> {
+  return await Promise.all(
+    files.map(async (filePath) => {
+      const data = await readFile(filePath);
+      return {
+        name: basename(filePath),
+        mimeType: guessMimeType(filePath),
+        dataBase64: data.toString('base64'),
+      };
+    })
+  );
+}
+
+function guessMimeType(filePath: string): string {
+  const extension = extname(filePath).toLowerCase();
+
+  switch (extension) {
+    case '.txt':
+    case '.log':
+    case '.md':
+    case '.csv':
+      return 'text/plain';
+    case '.json':
+      return 'application/json';
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function shouldFallbackToSyntheticUpload(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes('"Not allowed"') || error.message.includes('Not allowed');
+}
+
+function buildSyntheticFileUploadCode(
+  selector: string,
+  files: SyntheticUploadFile[]
+): string {
+  return `(() => {
+    const selector = ${JSON.stringify(selector)};
+    const files = ${JSON.stringify(files)};
+    const input = document.querySelector(selector);
+    if (!(input instanceof HTMLInputElement) || input.type !== 'file') {
+      throw new Error('Selector does not target a file input: ' + selector);
+    }
+
+    const decodeBase64 = (value) => {
+      const binary = atob(value);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    };
+
+    const transfer = new DataTransfer();
+    for (const file of files) {
+      transfer.items.add(
+        new File([decodeBase64(file.dataBase64)], file.name, {
+          type: file.mimeType,
+        })
+      );
+    }
+
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+    return {
+      assignedCount: input.files ? input.files.length : 0,
+      names: Array.from(input.files || []).map((file) => file.name),
+    };
+  })()`;
 }
 
 function selectAdoptableLaunchWindow(windows: CliWindowInfo[]): CliWindowInfo | null {

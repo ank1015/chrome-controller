@@ -299,6 +299,7 @@ function createOpenHelpLines(): string[] {
     'Notes:',
     "  Opens a tab or reuses an existing exact URL match inside the active session's managed window, pins it as the session current tab, and can wait for stable readiness.",
     '  This command defaults to --active=false so later commands can stay pinned to the chosen tab without stealing focus.',
+    '  When you use --ready, the wait defaults are --timeout-ms 30000 --poll-ms 250 --quiet-ms 500 unless you override them.',
     '  If --ready cannot confirm stability, the tab still opens and stays pinned. JSON output includes ready=false and readyError.',
   ];
 }

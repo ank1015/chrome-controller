@@ -758,6 +758,8 @@ function createWaitHelpLines(): string[] {
     '  chrome-controller wait download [downloads wait options]',
     '',
     'Notes:',
+    '  wait stable defaults to --timeout-ms 30000 --poll-ms 250 --quiet-ms 500, so you usually do not need to pass them.',
+    '  Override those flags only for unusually slow pages, very noisy apps, or debugging.',
     '  wait stable tolerates persistent background requests once the DOM and network have been quiet for the requested window.',
   ];
 }

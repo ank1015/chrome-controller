@@ -4,6 +4,7 @@ import {
   resolveElementTarget,
   retryStaleDomOperation,
   runDomOperation,
+  withAttachedDebugger,
 } from '../interaction-support.js';
 import { pressKeyOnTab } from './keyboard.js';
 import { parsePositiveInteger, resolveManagedCurrentTab } from './support.js';
@@ -51,16 +52,105 @@ async function runElementActionCommand(
   rawArgs: string[],
   options: ElementCommandOptions
 ): Promise<CliCommandResult> {
-  const parsed = parseRetryStaleFlag(rawArgs);
+  const parsed =
+    action === 'click'
+      ? parseClickFlags(rawArgs)
+      : {
+          ...parseRetryStaleFlag(rawArgs),
+          openInNewTab: false,
+        };
   const [target, ...rest] = parsed.args;
   if (!target) {
-    throw new Error(`Usage: chrome-controller element ${action} <selector|@ref>`);
+    throw new Error(getElementActionUsage(action));
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for element ${action}: ${rest[0]}`);
   }
 
   const resolved = await resolveElementCommandTarget(options, target);
+  if (action === 'click' && parsed.openInNewTab) {
+    const boxOperation = async () =>
+      await runDomOperation(
+        options.browserService,
+        resolved.session,
+        resolved.tabId,
+        resolved.target,
+        'box'
+      );
+    const boxResult = parsed.retryStale
+      ? await retryStaleDomOperation(
+          `element click ${resolved.target.ref ?? resolved.target.raw}`,
+          boxOperation
+        )
+      : await boxOperation();
+
+    if (!boxResult.box) {
+      throw new Error(`Could not determine click position for ${resolved.target.description}`);
+    }
+
+    await options.browserService.activateTab(resolved.session, resolved.tabId);
+    const newTabModifier = getNewTabClickModifier();
+    await withAttachedDebugger(
+      options.browserService,
+      resolved.session,
+      resolved.tabId,
+      async () => {
+        await dispatchDebuggerMouseEvent(
+          options.browserService,
+          resolved.session,
+          resolved.tabId,
+          'mouseMoved',
+          {
+            x: boxResult.box.centerX,
+            y: boxResult.box.centerY,
+            button: 'none',
+            buttons: 0,
+          }
+        );
+        await dispatchDebuggerMouseEvent(
+          options.browserService,
+          resolved.session,
+          resolved.tabId,
+          'mousePressed',
+          {
+            x: boxResult.box.centerX,
+            y: boxResult.box.centerY,
+            button: 'left',
+            buttons: 1,
+            clickCount: 1,
+            modifiers: newTabModifier.mask,
+          }
+        );
+        await dispatchDebuggerMouseEvent(
+          options.browserService,
+          resolved.session,
+          resolved.tabId,
+          'mouseReleased',
+          {
+            x: boxResult.box.centerX,
+            y: boxResult.box.centerY,
+            button: 'left',
+            buttons: 0,
+            clickCount: 1,
+            modifiers: newTabModifier.mask,
+          }
+        );
+      }
+    );
+
+    return {
+      session: resolved.session,
+      data: {
+        tabId: resolved.tabId,
+        target: resolved.target.ref ?? resolved.target.raw,
+        matchedSelector: boxResult.matchedSelector ?? null,
+        modifierKey: newTabModifier.key,
+        newTab: true,
+      },
+      lines: [`Opened ${resolved.target.description} in a new tab`],
+    };
+  }
+
   const evaluateOptions = shouldUseUserGesture(action)
     ? { userGesture: true }
     : undefined;
@@ -99,6 +189,30 @@ async function runElementActionCommand(
     },
     lines: [`${formatActionVerb(action)} ${resolved.target.description}`],
   };
+}
+
+async function dispatchDebuggerMouseEvent(
+  browserService: BrowserService,
+  session: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['session'],
+  tabId: number,
+  type: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const params = {
+    type,
+    ...payload,
+  };
+
+  try {
+    await browserService.sendDebuggerCommand(session, tabId, 'Input.dispatchMouseEvent', params);
+  } catch (error) {
+    if (!isMissingDebuggerSessionError(error)) {
+      throw error;
+    }
+
+    await browserService.attachDebugger(session, tabId);
+    await browserService.sendDebuggerCommand(session, tabId, 'Input.dispatchMouseEvent', params);
+  }
 }
 
 async function runElementValueCommand(
@@ -206,6 +320,36 @@ async function runElementPressCommand(
         focusOperation
       )
     : await focusOperation();
+  const submitResult =
+    parsedCount.count === 1 && keyName.trim().toLowerCase() === 'enter'
+      ? await runDomOperation(
+          options.browserService,
+          resolved.session,
+          resolved.tabId,
+          resolved.target,
+          'submit'
+        )
+      : null;
+
+  if (submitResult?.submitted === true) {
+    return {
+      session: resolved.session,
+      data: {
+        tabId: resolved.tabId,
+        target: resolved.target.ref ?? resolved.target.raw,
+        matchedSelector: focusResult.matchedSelector ?? null,
+        key: 'Enter',
+        count: 1,
+        result: {
+          ...focusResult,
+          submitted: true,
+          strategy: submitResult.strategy ?? null,
+        },
+      },
+      lines: [`Submitted ${resolved.target.description}`],
+    };
+  }
+
   const keyResult = await pressKeyOnTab(
     options.browserService,
     resolved.session,
@@ -272,6 +416,35 @@ function parseRetryStaleFlag(args: string[]): {
   return {
     args: rest,
     retryStale,
+  };
+}
+
+function parseClickFlags(args: string[]): {
+  args: string[];
+  retryStale: boolean;
+  openInNewTab: boolean;
+} {
+  const rest: string[] = [];
+  let retryStale = false;
+  let openInNewTab = false;
+
+  for (const arg of args) {
+    if (arg === '--retry-stale') {
+      retryStale = true;
+      continue;
+    }
+    if (arg === '--new-tab') {
+      openInNewTab = true;
+      continue;
+    }
+
+    rest.push(arg);
+  }
+
+  return {
+    args: rest,
+    retryStale,
+    openInNewTab,
   };
 }
 
@@ -356,6 +529,35 @@ function requireTabId(tab: { id: number | null }): number {
   return tab.id;
 }
 
+function getNewTabClickModifier(): {
+  key: 'Meta' | 'Control';
+  mask: number;
+} {
+  if (process.platform === 'darwin') {
+    return {
+      key: 'Meta',
+      mask: 4,
+    };
+  }
+
+  return {
+    key: 'Control',
+    mask: 2,
+  };
+}
+
+function isMissingDebuggerSessionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('No debugger session');
+}
+
+function getElementActionUsage(action: 'click' | 'check' | 'uncheck'): string {
+  if (action === 'click') {
+    return 'Usage: chrome-controller element click <selector|@ref> [--new-tab] [--retry-stale]';
+  }
+
+  return `Usage: chrome-controller element ${action} <selector|@ref>`;
+}
+
 function formatActionVerb(action: string): string {
   switch (action) {
     case 'type':
@@ -379,7 +581,7 @@ function createElementHelpLines(): string[] {
     'Use `tabs use <tabId>` to switch which tab element commands operate on.',
     '',
     'Usage:',
-    '  chrome-controller element click <selector|@ref>',
+    '  chrome-controller element click <selector|@ref> [--new-tab] [--retry-stale]',
     '  chrome-controller element fill <selector|@ref> <value>',
     '  chrome-controller element type <selector|@ref> <value> [--delay-ms <n>]',
     '  chrome-controller element press <selector|@ref> <key> [--count <n>]',
@@ -389,6 +591,7 @@ function createElementHelpLines(): string[] {
     '',
     'Notes:',
     '  Targets can be CSS selectors or snapshot refs like @e1.',
+    '  Add --new-tab to open a link in a background tab. It uses Command-click on macOS and Ctrl-click elsewhere.',
     '  Add --retry-stale to retry transient detached or re-render races on dynamic pages.',
   ];
 }

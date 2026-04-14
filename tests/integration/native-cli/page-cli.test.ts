@@ -44,7 +44,16 @@ function createTab(overrides: Partial<CliTabInfo> = {}): CliTabInfo {
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
   pageTextDetachedFailuresRemaining = 0;
   pageSnapshotDetachedFailuresRemaining = 0;
+  pageSnapshotPayload: Record<string, unknown> | null = null;
   pageTextResponses: Array<{ title: string; url: string; html: string }> | null = null;
+  backHistoryByTabId = new Map<
+    number,
+    {
+      url: string;
+      title: string;
+      status?: string;
+    }
+  >();
 
   private readonly tabs = new Map<number, CliTabInfo>([
     [101, createTab({ id: 101, active: true, title: 'Home', url: 'https://example.com/home' })],
@@ -151,6 +160,10 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
         throw new Error('Detached while handling command.');
       }
 
+      if (this.pageSnapshotPayload) {
+        return this.pageSnapshotPayload;
+      }
+
       return {
         [PAGE_SNAPSHOT_EVAL_MARKER]: true,
         title: 'Example Login',
@@ -215,6 +228,25 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
         title: 'Example Article',
         url: 'https://example.com/article',
         html: '<main><h1>Hello world</h1><p>Visit <a href="https://example.com/docs">the docs</a>.</p><script>ignore()</script></main>',
+      };
+    }
+
+    if (code.includes('window.history.back()')) {
+      const tab = this.tabs.get(tabId);
+      const target = this.backHistoryByTabId.get(tabId);
+      if (tab && target) {
+        tab.url = target.url;
+        tab.title = target.title;
+        tab.status = target.status ?? 'complete';
+        return {
+          canGoBack: true,
+          previousUrl: 'https://example.com/current',
+        };
+      }
+
+      return {
+        canGoBack: false,
+        previousUrl: tab?.url ?? null,
       };
     }
 
@@ -507,6 +539,65 @@ describe('native CLI page commands', () => {
         method: 'getTab',
         sessionId: 'alpha',
         payload: 102,
+      },
+    ]);
+  });
+
+  it('goes back in browser history for the current tab', async () => {
+    browserService.backHistoryByTabId.set(101, {
+      url: 'https://example.com/home',
+      title: 'Home',
+    });
+    const outcome = await runCliCommand(['page', 'back', '--json'], tempHome, browserService, now);
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data).toEqual({
+      tab: {
+        id: 101,
+        windowId: 11,
+        active: true,
+        pinned: false,
+        audible: false,
+        muted: false,
+        title: 'Home',
+        url: 'https://example.com/home',
+        index: 0,
+        status: 'complete',
+        groupId: -1,
+      },
+      canGoBack: true,
+    });
+    expect(browserService.calls).toEqual([
+      {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
+        method: 'listTabs',
+        sessionId: 's1',
+        payload: {
+          windowId: 11,
+        },
+      },
+      {
+        method: 'evaluateTab',
+        sessionId: 's1',
+        payload: {
+          tabId: 101,
+          code: expect.stringContaining('window.history.back()'),
+          options: {
+            userGesture: true,
+          },
+        },
+      },
+      {
+        method: 'getTab',
+        sessionId: 's1',
+        payload: 101,
       },
     ]);
   });
@@ -905,5 +996,59 @@ describe('native CLI page commands', () => {
     expect(
       browserService.calls.filter((call) => call.method === 'evaluateTab')
     ).toHaveLength(3);
+  });
+
+  it('supports --limit on raw page snapshot output', async () => {
+    browserService.pageSnapshotPayload = {
+      [PAGE_SNAPSHOT_EVAL_MARKER]: true,
+      source: 'dom-interactive-v1',
+      title: 'Messages',
+      url: 'https://example.com/messages',
+      elements: [
+        {
+          role: 'button',
+          name: 'Thread A',
+          selector: '#thread-a',
+          top: 20,
+          left: 20,
+          inViewport: true,
+          distanceFromViewport: 0,
+        },
+        {
+          role: 'button',
+          name: 'Thread B',
+          selector: '#thread-b',
+          top: 40,
+          left: 20,
+          inViewport: true,
+          distanceFromViewport: 0,
+        },
+        {
+          role: 'button',
+          name: 'Thread C',
+          selector: '#thread-c',
+          top: 60,
+          left: 20,
+          inViewport: true,
+          distanceFromViewport: 0,
+        },
+      ],
+      count: 3,
+      visibleCount: 3,
+    };
+
+    const outcome = await runCliCommand(
+      ['page', 'snapshot', '--limit', '2', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.elements).toHaveLength(2);
+    expect(payload.data.displayedCount).toBe(2);
+    expect(payload.data.count).toBe(3);
+    expect(payload.data.truncated).toBe(true);
   });
 });

@@ -154,6 +154,30 @@ describe('native CLI session commands', () => {
     expect(outcome.stderr).toBe('');
   });
 
+  it('suggests use or reset when session create collides with an existing id', async () => {
+    await runCliCommand(
+      ['session', 'create', '--id', 'gmail-task', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    const outcome = await runCliCommand(
+      ['session', 'create', '--id', 'gmail-task', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(1);
+    expect(payload).toEqual({
+      success: false,
+      error:
+        'Session "gmail-task" already exists. Use "chrome-controller session use gmail-task" to switch to it or "chrome-controller session reset gmail-task" to recreate its managed window.',
+    });
+  });
+
   it('closes a named session and keeps the others', async () => {
     await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
     await runCliCommand(['session', 'create', '--id', 'beta', '--json'], tempHome, browserService, now);

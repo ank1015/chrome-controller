@@ -15,6 +15,8 @@ declare const location: any;
 declare const Node: any;
 declare const Element: any;
 declare const HTMLInputElement: any;
+declare const HTMLTextAreaElement: any;
+declare const HTMLSelectElement: any;
 declare function getComputedStyle(element: any): any;
 
 const SNAPSHOT_CACHE_DIRECTORY = 'snapshot-cache';
@@ -46,10 +48,72 @@ export function selectActionableSnapshotTarget(element: any, role: string): any 
     return element;
   }
 
+  const isElementNode = (candidate: any): boolean =>
+    Boolean(candidate && typeof candidate === 'object' && candidate.nodeType === 1);
+
   const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
   if (!normalizedRole) {
     return element;
   }
+
+  const isStrictlyVisible = (candidate: any): boolean => {
+    if (!isElementNode(candidate)) {
+      return false;
+    }
+
+    if (
+      typeof getComputedStyle !== 'function' ||
+      typeof candidate.getBoundingClientRect !== 'function' ||
+      typeof candidate.getClientRects !== 'function'
+    ) {
+      return true;
+    }
+
+    const style = getComputedStyle(candidate);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse'
+    ) {
+      return false;
+    }
+
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && candidate.getClientRects().length > 0;
+  };
+
+  const supportsAncestorVisibilityFallback = (candidate: any): boolean => {
+    if (!isElementNode(candidate)) {
+      return false;
+    }
+
+    if (normalizedRole === 'textbox' || normalizedRole === 'searchbox') {
+      return true;
+    }
+
+    return normalizedRole === 'combobox' || normalizedRole === 'listbox';
+  };
+
+  const hasVisibleAncestor = (candidate: any): boolean => {
+    let current = candidate?.parentElement ?? null;
+
+    while (current) {
+      if (isStrictlyVisible(current)) {
+        return true;
+      }
+      current = current.parentElement ?? null;
+    }
+
+    return false;
+  };
+
+  const isUsableTarget = (candidate: any): boolean => {
+    if (isStrictlyVisible(candidate)) {
+      return true;
+    }
+
+    return supportsAncestorVisibilityFallback(candidate) && hasVisibleAncestor(candidate);
+  };
 
   const matches = (selector: string): boolean => {
     try {
@@ -60,15 +124,20 @@ export function selectActionableSnapshotTarget(element: any, role: string): any 
   };
 
   const findCandidate = (selector: string): any => {
-    if (matches(selector)) {
+    if (matches(selector) && isUsableTarget(element)) {
       return element;
     }
 
     try {
-      if (typeof element.querySelector === 'function') {
-        const descendant = element.querySelector(selector);
-        if (descendant) {
-          return descendant;
+      if (typeof element.querySelectorAll === 'function') {
+        const descendants = Array.from(element.querySelectorAll(selector));
+        const visibleDescendant = descendants.find((candidate) => isUsableTarget(candidate));
+        if (visibleDescendant) {
+          return visibleDescendant;
+        }
+
+        if (descendants.length > 0) {
+          return descendants[0];
         }
       }
     } catch {
@@ -78,7 +147,7 @@ export function selectActionableSnapshotTarget(element: any, role: string): any 
     try {
       if (typeof element.closest === 'function') {
         const ancestor = element.closest(selector);
-        if (ancestor) {
+        if (ancestor && isUsableTarget(ancestor)) {
           return ancestor;
         }
       }
@@ -286,8 +355,11 @@ export function getPageSnapshotCachePath(
   );
 }
 
-export function renderPageSnapshotLines(snapshot: CliPageSnapshot): string[] {
-  const display = createPageSnapshotDisplay(snapshot);
+export function renderPageSnapshotLines(
+  snapshot: CliPageSnapshot,
+  limit: number = DEFAULT_PAGE_SNAPSHOT_DISPLAY_LIMIT
+): string[] {
+  const display = createPageSnapshotDisplay(snapshot, limit);
   const lines = [
     `Page: ${snapshot.title ?? 'Untitled page'}`,
     `URL: ${snapshot.url ?? 'Unknown URL'}`,
@@ -615,22 +687,108 @@ function pageSnapshotRuntime(
     return normalized ? normalized.slice(0, 160) : null;
   };
 
-  const isUniqueSelector = (selector: string | null): boolean => {
+  const isElementNode = (element: any): boolean =>
+    Boolean(element && typeof element === 'object' && element.nodeType === 1);
+
+  const getElementDocument = (element: any): any =>
+    element?.ownerDocument ?? document;
+
+  const getElementWindow = (element: any): any =>
+    getElementDocument(element)?.defaultView ?? globalThis;
+
+  const isInputElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'input';
+
+  const isTextAreaElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'textarea';
+
+  const isSelectElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'select';
+
+  const isFrameElement = (element: any): boolean => {
+    const tagName = String(element?.tagName || '').toLowerCase();
+    return tagName === 'iframe' || tagName === 'frame';
+  };
+
+  const queryAll = (queryDocument: any, selector: string): any[] => {
+    if (!queryDocument || typeof queryDocument.querySelectorAll !== 'function') {
+      return [];
+    }
+
+    try {
+      return Array.from(queryDocument.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  };
+
+  const getAccessibleFrameDocument = (frameElement: any): any | null => {
+    if (!isFrameElement(frameElement)) {
+      return null;
+    }
+
+    try {
+      const frameDocument =
+        frameElement.contentDocument ?? frameElement.contentWindow?.document ?? null;
+      return frameDocument && frameDocument.documentElement ? frameDocument : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getVisibleFrameArea = (frameElement: any): number => {
+    if (!isElementNode(frameElement)) {
+      return 0;
+    }
+
+    const view = getElementWindow(frameElement);
+    const style =
+      typeof view?.getComputedStyle === 'function'
+        ? view.getComputedStyle(frameElement)
+        : getComputedStyle(frameElement);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse'
+    ) {
+      return 0;
+    }
+
+    const rect = frameElement.getBoundingClientRect();
+    const viewportWidth = Number(view?.innerWidth ?? globalThis.innerWidth) || 0;
+    const viewportHeight = Number(view?.innerHeight ?? globalThis.innerHeight) || 0;
+    const visibleWidth = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0));
+    const visibleHeight = Math.max(
+      0,
+      Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0)
+    );
+
+    return visibleWidth * visibleHeight;
+  };
+
+  const getDocumentTextLength = (queryDocument: any): number =>
+    cleanText(
+      queryDocument?.body?.innerText ||
+        queryDocument?.documentElement?.innerText ||
+        queryDocument?.body?.textContent ||
+        queryDocument?.documentElement?.textContent ||
+        ''
+    )?.length ?? 0;
+
+  const isUniqueSelector = (selector: string | null, queryDocument: any = document): boolean => {
     if (!selector) {
       return false;
     }
 
-    try {
-      return document.querySelectorAll(selector).length === 1;
-    } catch {
-      return false;
-    }
+    return queryAll(queryDocument, selector).length === 1;
   };
 
   const getLabelText = (element: any): string | null => {
     if (!element) {
       return null;
     }
+
+    const ownerDocument = getElementDocument(element);
 
     const ariaLabel = cleanText(element.getAttribute('aria-label'));
     if (ariaLabel) {
@@ -642,7 +800,7 @@ function pageSnapshotRuntime(
       const ids = labelledBy.split(/\s+/g).filter(Boolean);
       const labelText = cleanText(
         ids
-          .map((id: string) => document.getElementById(id))
+          .map((id: string) => ownerDocument?.getElementById?.(id))
           .filter(Boolean)
           .map((node: any) => node.innerText || node.textContent || '')
           .join(' ')
@@ -663,7 +821,7 @@ function pageSnapshotRuntime(
       }
     }
 
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
       const type = (element.type || '').toLowerCase();
       if (type === 'button' || type === 'submit' || type === 'reset') {
         const inputValue = cleanText(element.value);
@@ -755,12 +913,16 @@ function pageSnapshotRuntime(
     return 'generic';
   };
 
-  const isVisible = (element: any): boolean => {
-    if (!element || !(element instanceof Element)) {
+  const isStrictlyVisible = (element: any): boolean => {
+    if (!isElementNode(element)) {
       return false;
     }
 
-    const style = getComputedStyle(element);
+    const view = getElementWindow(element);
+    const style =
+      typeof view?.getComputedStyle === 'function'
+        ? view.getComputedStyle(element)
+        : getComputedStyle(element);
     if (
       style.display === 'none' ||
       style.visibility === 'hidden' ||
@@ -770,11 +932,143 @@ function pageSnapshotRuntime(
     }
 
     const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
+    return rect.width > 0 && rect.height > 0 && element.getClientRects().length > 0;
+  };
+
+  const supportsAncestorVisibilityFallback = (element: any): boolean => {
+    if (!isElementNode(element)) {
       return false;
     }
 
-    return element.getClientRects().length > 0;
+    if (isTextAreaElement(element) || isSelectElement(element)) {
+      return true;
+    }
+
+    if (isInputElement(element)) {
+      const type = (element.type || 'text').toLowerCase();
+      return ![
+        'hidden',
+        'checkbox',
+        'radio',
+        'range',
+        'button',
+        'submit',
+        'reset',
+        'image',
+        'file',
+      ].includes(type);
+    }
+
+    if (element.isContentEditable) {
+      return true;
+    }
+
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    return role === 'textbox' || role === 'searchbox' || role === 'combobox';
+  };
+
+  const hasVisibleAncestor = (element: any): boolean => {
+    let current = element?.parentElement ?? null;
+
+    while (current) {
+      if (isStrictlyVisible(current)) {
+        return true;
+      }
+      current = current.parentElement ?? null;
+    }
+
+    return false;
+  };
+
+  const isVisible = (element: any): boolean => {
+    if (!isElementNode(element)) {
+      return false;
+    }
+
+    if (isStrictlyVisible(element)) {
+      return true;
+    }
+
+    return supportsAncestorVisibilityFallback(element) && hasVisibleAncestor(element);
+  };
+
+  const prefixFrameScopedSelector = (
+    frameSelectors: string[],
+    selector: string | null
+  ): string | null => {
+    if (!selector) {
+      return null;
+    }
+
+    return frameSelectors.length > 0
+      ? `${frameSelectors.join(' >>> ')} >>> ${selector}`
+      : selector;
+  };
+
+  const resolvePrimaryCaptureContext = (
+    queryDocument: any,
+    frameSelectors: string[] = []
+  ): { doc: any; frameSelectors: string[] } => {
+    const view = queryDocument?.defaultView ?? globalThis;
+    const viewportArea =
+      (Number(view?.innerWidth ?? globalThis.innerWidth) || 0) *
+      (Number(view?.innerHeight ?? globalThis.innerHeight) || 0);
+
+    const frameCandidates = queryAll(queryDocument, 'iframe, frame')
+      .map((frameElement) => {
+        const frameDocument = getAccessibleFrameDocument(frameElement);
+        if (!frameDocument) {
+          return null;
+        }
+
+        const frameArea = getVisibleFrameArea(frameElement);
+        if (frameArea <= 0) {
+          return null;
+        }
+
+        const frameSelector =
+          buildSelectorCandidates(frameElement, queryDocument)[0] ||
+          buildFallbackSelector(frameElement, queryDocument);
+        if (!frameSelector) {
+          return null;
+        }
+
+        return {
+          doc: frameDocument,
+          frameSelectors: [...frameSelectors, frameSelector],
+          area: frameArea,
+          textLength: getDocumentTextLength(frameDocument),
+        };
+      })
+      .filter((candidate): candidate is {
+        doc: any;
+        frameSelectors: string[];
+        area: number;
+        textLength: number;
+      } => Boolean(candidate))
+      .sort((left, right) => {
+        if (left.area !== right.area) {
+          return right.area - left.area;
+        }
+        return right.textLength - left.textLength;
+      });
+
+    const dominantFrame = frameCandidates.find((candidate) => {
+      if (viewportArea <= 0) {
+        return candidate.textLength > 0;
+      }
+
+      return candidate.area / viewportArea >= 0.5 && candidate.textLength > 0;
+    });
+
+    if (!dominantFrame) {
+      return {
+        doc: queryDocument,
+        frameSelectors,
+      };
+    }
+
+    return resolvePrimaryCaptureContext(dominantFrame.doc, dominantFrame.frameSelectors);
   };
 
   const isInteractiveElement = (element: any): boolean => {
@@ -818,7 +1112,29 @@ function pageSnapshotRuntime(
     return interactiveRoles.has(role);
   };
 
-  const buildSelectorCandidates = (element: any): string[] => {
+  const getVisibleGeometryElement = (actionableElement: any, sourceElement: any): any => {
+    if (isStrictlyVisible(actionableElement)) {
+      return actionableElement;
+    }
+
+    if (supportsAncestorVisibilityFallback(actionableElement)) {
+      let current = actionableElement?.parentElement ?? null;
+      while (current) {
+        if (isStrictlyVisible(current)) {
+          return current;
+        }
+        current = current.parentElement ?? null;
+      }
+    }
+
+    if (isStrictlyVisible(sourceElement)) {
+      return sourceElement;
+    }
+
+    return actionableElement;
+  };
+
+  const buildSelectorCandidates = (element: any, queryDocument: any): string[] => {
     const tagName = element.tagName.toLowerCase();
     const candidates = [];
 
@@ -860,17 +1176,27 @@ function pageSnapshotRuntime(
       candidates.push(`${tagName}[href="${escapeAttributeValue(element.getAttribute('href'))}"]`);
     }
 
-    return candidates.filter(isUniqueSelector);
+    if ((tagName === 'iframe' || tagName === 'frame') && element.getAttribute('title')) {
+      candidates.push(`${tagName}[title="${escapeAttributeValue(element.getAttribute('title'))}"]`);
+    }
+
+    if ((tagName === 'iframe' || tagName === 'frame') && element.getAttribute('src')) {
+      candidates.push(`${tagName}[src="${escapeAttributeValue(element.getAttribute('src'))}"]`);
+    }
+
+    return candidates.filter((selector) => isUniqueSelector(selector, queryDocument));
   };
 
-  const buildFallbackSelector = (element: any): string | null =>
+  const buildFallbackSelector = (element: any, queryDocument: any): string | null =>
     buildUniqueSelector(element, {
-      isUniqueSelector,
+      isUniqueSelector: (selector) => isUniqueSelector(selector, queryDocument),
       escapeIdentifier,
     });
 
   const buildElementRecord = (
-    element: any
+    element: any,
+    queryDocument: any,
+    frameSelectors: string[]
   ): {
     record: Record<string, unknown>;
     actionableElement: any;
@@ -878,21 +1204,28 @@ function pageSnapshotRuntime(
     const semanticRole = getRole(element);
     const role = semanticRole === 'generic' ? getFallbackInteractionRole(element) : semanticRole;
     const actionableElement = selectActionableTarget(element, role) ?? element;
+    const geometryElement = getVisibleGeometryElement(actionableElement, element);
     const selectorSource =
       actionableElement && actionableElement.tagName ? actionableElement : element;
-    const candidates = buildSelectorCandidates(selectorSource);
-    const fallbackSelector = buildFallbackSelector(selectorSource);
-    const selector = candidates[0] || fallbackSelector || null;
+    const candidates = buildSelectorCandidates(selectorSource, queryDocument);
+    const fallbackSelector = buildFallbackSelector(selectorSource, queryDocument);
+    const selector =
+      prefixFrameScopedSelector(frameSelectors, candidates[0] || fallbackSelector || null) || null;
     const alternatives = candidates
-      .filter((candidate) => candidate !== selector)
-      .concat(fallbackSelector && fallbackSelector !== selector ? [fallbackSelector] : []);
+      .map((candidate) => prefixFrameScopedSelector(frameSelectors, candidate))
+      .filter((candidate) => candidate && candidate !== selector)
+      .concat(
+        fallbackSelector && prefixFrameScopedSelector(frameSelectors, fallbackSelector) !== selector
+          ? [prefixFrameScopedSelector(frameSelectors, fallbackSelector)]
+          : []
+      );
     const checked =
       role === 'checkbox' || role === 'radio' || role === 'switch'
-        ? actionableElement instanceof HTMLInputElement
+        ? isInputElement(actionableElement)
           ? actionableElement.checked
           : actionableElement.getAttribute('aria-checked') === 'true'
         : null;
-    const rect = actionableElement.getBoundingClientRect();
+    const rect = geometryElement.getBoundingClientRect();
     const viewportWidth = Number(globalThis.innerWidth) || 0;
     const viewportHeight = Number(globalThis.innerHeight) || 0;
     const inViewport =
@@ -915,11 +1248,11 @@ function pageSnapshotRuntime(
         name: getLabelText(element) ?? getLabelText(actionableElement),
         tagName: actionableElement.tagName.toLowerCase(),
         inputType:
-          actionableElement instanceof HTMLInputElement
+          isInputElement(actionableElement)
             ? (actionableElement.type || 'text').toLowerCase()
             : null,
         selector,
-        alternativeSelectors: Array.from(new Set(alternatives.filter(Boolean))),
+        alternativeSelectors: Array.from(new Set(alternatives.filter(Boolean) as string[])),
         placeholder: cleanText(actionableElement.getAttribute('placeholder')),
         disabled:
           actionableElement.hasAttribute('disabled') ||
@@ -954,8 +1287,9 @@ function pageSnapshotRuntime(
   const includedElements = new WeakSet<object>();
   const includedActionTargets = new WeakSet<object>();
   let totalCount = 0;
+  const captureContext = resolvePrimaryCaptureContext(document);
 
-  for (const element of Array.from(document.querySelectorAll('*')) as any[]) {
+  for (const element of Array.from(captureContext.doc.querySelectorAll('*')) as any[]) {
     if (!isInteractiveElement(element) || !isVisible(element)) {
       continue;
     }
@@ -974,7 +1308,11 @@ function pageSnapshotRuntime(
       continue;
     }
 
-    const { record, actionableElement } = buildElementRecord(element);
+    const { record, actionableElement } = buildElementRecord(
+      element,
+      captureContext.doc,
+      captureContext.frameSelectors
+    );
     if (includedActionTargets.has(actionableElement)) {
       continue;
     }

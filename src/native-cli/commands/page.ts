@@ -3,6 +3,12 @@ import { dirname, extname, join, resolve } from 'node:path';
 
 import { captureStablePageSnapshot, captureStablePageText } from '../page-capture.js';
 import {
+  createFindPageSnapshotMarkdown,
+  createFindPageTextMarkdown,
+  runFindPageSnapshotLlm,
+  runFindPageTextLlm,
+} from '../find-page-model.js';
+import {
   createPageSnapshotDisplay,
   createPageSnapshotRecord,
   renderPageSnapshotLines,
@@ -41,6 +47,8 @@ export async function runPageCommand(
   switch (subcommand) {
     case 'goto':
       return await runGotoPageCommand(rest, options);
+    case 'back':
+      return await runPageBackCommand(rest, options);
     case 'url':
       return await runPageUrlCommand(rest, options);
     case 'title':
@@ -103,6 +111,78 @@ async function runGotoPageCommand(
   };
 }
 
+async function runPageBackCommand(
+  rawArgs: string[],
+  options: PageCommandOptions
+): Promise<CliCommandResult> {
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for page back: ${rawArgs[0]}`);
+  }
+
+  const { session, tab } = await resolvePageTab(options);
+  const tabId = requireTabId(tab, 'back');
+  const previousUrl = tab.url;
+  const previousTitle = tab.title;
+  const historyResult = (await options.browserService.evaluateTab(
+    session,
+    tabId,
+    `(() => {
+      const previousUrl = typeof location?.href === 'string' ? location.href : null;
+      const canGoBack = typeof window?.history?.length === 'number' ? window.history.length > 1 : false;
+      if (canGoBack) {
+        window.history.back();
+      }
+      return { canGoBack, previousUrl };
+    })()`,
+    {
+      userGesture: true,
+    }
+  )) as {
+    canGoBack?: boolean;
+    previousUrl?: string | null;
+  };
+
+  if (historyResult?.canGoBack !== true) {
+    return {
+      session,
+      data: {
+        tabId,
+        canGoBack: false,
+        tab: {
+          id: tab.id,
+          windowId: tab.windowId,
+          active: tab.active,
+          pinned: tab.pinned,
+          audible: tab.audible,
+          muted: tab.muted,
+          title: tab.title,
+          url: tab.url,
+          index: tab.index,
+          status: tab.status,
+          groupId: tab.groupId,
+        },
+      },
+      lines: [`No back history available for tab ${tabId}`],
+    };
+  }
+
+  const resolvedTab = await resolveHistoryNavigationTab(
+    options.browserService,
+    session,
+    tabId,
+    historyResult.previousUrl ?? previousUrl
+  );
+
+  return {
+    session,
+    data: {
+      tab: resolvedTab,
+      canGoBack: true,
+    },
+    lines: [formatBackResultLine(resolvedTab, tabId, previousUrl, previousTitle)],
+  };
+}
+
 async function runPageUrlCommand(
   rawArgs: string[],
   options: PageCommandOptions
@@ -147,14 +227,40 @@ async function runPageTextCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  if (rawArgs.length > 0) {
-    throw new Error(`Unknown option for page text: ${rawArgs[0]}`);
-  }
+  const parsed = parsePageFindFlags(rawArgs, 'page text', {
+    allowStandaloneLimit: false,
+  });
 
   const { session, tab } = await resolvePageTab(options);
   const tabId = requireTabId(tab, 'text');
   const rawTextCapture = await captureStablePageText(options.browserService, session, tabId);
   const pageMarkdown = createPageMarkdown(rawTextCapture);
+
+  if (parsed.findQuery) {
+    const pageTextMarkdown = createFindPageTextMarkdown({
+      pageText: pageMarkdown,
+    });
+    const resultMarkdown = await runFindPageTextLlm({
+      query: parsed.findQuery,
+      limit: parsed.limit,
+      pageTextMarkdown,
+    });
+
+    return {
+      session,
+      data: {
+        tabId,
+        title: pageMarkdown.title,
+        url: pageMarkdown.url,
+        markdown: pageMarkdown.markdown,
+        query: parsed.findQuery,
+        limit: parsed.limit,
+        pageTextMarkdown,
+        resultMarkdown,
+      },
+      lines: resultMarkdown ? resultMarkdown.split('\n') : [''],
+    };
+  }
 
   return {
     session,
@@ -194,9 +300,9 @@ async function runPageSnapshotCommand(
   rawArgs: string[],
   options: PageCommandOptions
 ): Promise<CliCommandResult> {
-  if (rawArgs.length > 0) {
-    throw new Error(`Unknown option for page snapshot: ${rawArgs[0]}`);
-  }
+  const parsed = parsePageFindFlags(rawArgs, 'page snapshot', {
+    allowStandaloneLimit: true,
+  });
 
   const { session, tab } = await resolvePageTab(options);
   const tabId = requireTabId(tab, 'snapshot');
@@ -206,9 +312,43 @@ async function runPageSnapshotCommand(
     tabId,
     raw: rawSnapshot,
   });
-  const snapshotDisplay = createPageSnapshotDisplay(snapshotRecord);
+  const snapshotDisplay = createPageSnapshotDisplay(snapshotRecord, parsed.limit);
 
   await writePageSnapshotCache(options.env, snapshotRecord);
+
+  if (parsed.findQuery) {
+    const snapshotMarkdown = createFindPageSnapshotMarkdown({
+      snapshot: snapshotRecord,
+    });
+    const resultMarkdown = await runFindPageSnapshotLlm({
+      query: parsed.findQuery,
+      limit: parsed.limit,
+      snapshotMarkdown,
+    });
+
+    return {
+      session,
+      data: {
+        source: snapshotRecord.source,
+        snapshotId: snapshotRecord.snapshotId,
+        capturedAt: snapshotRecord.capturedAt,
+        tabId: snapshotRecord.tabId,
+        title: snapshotRecord.title,
+        url: snapshotRecord.url,
+        elements: snapshotDisplay.elements,
+        count: snapshotRecord.count,
+        visibleCount: snapshotRecord.visibleCount,
+        displayedCount: snapshotDisplay.displayedCount,
+        scope: snapshotDisplay.scope,
+        truncated: snapshotDisplay.truncated,
+        query: parsed.findQuery,
+        limit: parsed.limit,
+        snapshotMarkdown,
+        resultMarkdown,
+      },
+      lines: resultMarkdown ? resultMarkdown.split('\n') : [''],
+    };
+  }
 
   return {
     session,
@@ -226,7 +366,7 @@ async function runPageSnapshotCommand(
       scope: snapshotDisplay.scope,
       truncated: snapshotDisplay.truncated,
     },
-    lines: renderPageSnapshotLines(snapshotRecord),
+    lines: renderPageSnapshotLines(snapshotRecord, parsed.limit),
   };
 }
 
@@ -367,6 +507,28 @@ async function resolveNavigatedTab(
   return latestTab;
 }
 
+async function resolveHistoryNavigationTab(
+  browserService: BrowserService,
+  session: Awaited<ReturnType<typeof resolveSession>>,
+  tabId: number,
+  previousUrl: string | null
+): Promise<Awaited<ReturnType<BrowserService['getTab']>>> {
+  let latestTab = await browserService.getTab(session, tabId);
+  if (latestTab.url && previousUrl && latestTab.url !== previousUrl) {
+    return latestTab;
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await sleep(100);
+    latestTab = await browserService.getTab(session, tabId);
+    if (latestTab.url && previousUrl && latestTab.url !== previousUrl) {
+      return latestTab;
+    }
+  }
+
+  return latestTab;
+}
+
 function formatGotoResultLine(
   tab: Awaited<ReturnType<typeof resolveNavigatedTab>>,
   requestedUrl: string,
@@ -375,6 +537,22 @@ function formatGotoResultLine(
   const parts = [`Navigated tab ${tab.id ?? fallbackTabId} to ${tab.url ?? requestedUrl}`];
 
   if (tab.title) {
+    parts.push(JSON.stringify(tab.title));
+  }
+
+  return parts.join(' ');
+}
+
+function formatBackResultLine(
+  tab: Awaited<ReturnType<typeof resolveHistoryNavigationTab>>,
+  fallbackTabId: number,
+  previousUrl: string | null,
+  previousTitle: string | null
+): string {
+  const destination = tab.url ?? previousUrl ?? 'the previous history entry';
+  const parts = [`Went back in tab ${tab.id ?? fallbackTabId} to ${destination}`];
+
+  if (tab.title && tab.title !== previousTitle) {
     parts.push(JSON.stringify(tab.title));
   }
 
@@ -544,6 +722,66 @@ function readRequiredOptionValue(args: string[], index: number, flagName: string
   return value;
 }
 
+function parsePageFindFlags(
+  args: string[],
+  commandName: string,
+  options: {
+    allowStandaloneLimit: boolean;
+  }
+): {
+  findQuery: string | null;
+  limit: number;
+} {
+  let findQuery: string | null = null;
+  let limit = 20;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--find') {
+      findQuery = readRequiredOptionValue(args, index, '--find');
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--find=')) {
+      findQuery = arg.slice('--find='.length);
+      continue;
+    }
+    if (arg === '--limit') {
+      limit = parsePositiveInteger(readRequiredOptionValue(args, index, '--limit'), '--limit');
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--limit=')) {
+      limit = parsePositiveInteger(arg.slice('--limit='.length), '--limit');
+      continue;
+    }
+
+    throw new Error(`Unknown option for ${commandName}: ${arg}`);
+  }
+
+  if (findQuery !== null && findQuery.trim().length === 0) {
+    throw new Error('Missing value for --find');
+  }
+  if (findQuery === null && limit !== 20 && !options.allowStandaloneLimit) {
+    throw new Error(`--limit can only be used with --find for ${commandName}`);
+  }
+
+  return {
+    findQuery,
+    limit,
+  };
+}
+
+function parsePositiveInteger(value: string, flagName: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid integer value for ${flagName}: ${value}`);
+  }
+
+  return parsed;
+}
+
 function createPageHelpLines(): string[] {
   return [
     'Page commands',
@@ -553,19 +791,22 @@ function createPageHelpLines(): string[] {
     '',
     'Usage:',
     '  chrome-controller page goto <url>',
+    '  chrome-controller page back',
     '  chrome-controller page url',
     '  chrome-controller page title',
-    '  chrome-controller page text',
-    '  chrome-controller page snapshot',
-    '  chrome-controller page find <query> [--limit <n>]',
+    '  chrome-controller page text [--find <query> [--limit <n>]]',
+    '  chrome-controller page snapshot [--find <query>] [--limit <n>]',
     '  chrome-controller page eval <code> [--await-promise] [--user-gesture]',
     '  chrome-controller page pdf [path] [--format <letter|a4|legal|tabloid>] [--landscape] [--background] [--scale <number>] [--css-page-size]',
     '  chrome-controller page screenshot [path] [--format <png|jpeg|webp>] [--quality <0-100>] [--full-page]',
     '',
     'Notes:',
+    '  `page back` goes to the previous browser history entry for the current tab.',
     '  When no PDF path is provided, the file is saved under CHROME_CONTROLLER_HOME/artifacts/pdfs.',
     '  When no screenshot path is provided, the file is saved under CHROME_CONTROLLER_HOME/artifacts/screenshots.',
     '  Snapshot output is interactive-first and saves the latest ref map per session/tab.',
+    '  Add `--find "<query>"` to `page text` or `page snapshot` when you want a filtered relevant view instead of the full output.',
+    '  For raw `page snapshot` output, `--limit` caps how many visible elements are shown.',
     '  Top-level `open <url>` is the safer way to move to a known URL while reusing an exact match in the managed window when possible.',
   ];
 }

@@ -45,7 +45,22 @@ async function runCreateSessionCommand(
   options: SessionCommandOptions
 ): Promise<CliCommandResult> {
   const sessionId = resolveCreateSessionId(args, options.explicitSessionId);
-  const createdSession = await options.sessionStore.createSession(sessionId ?? undefined);
+  if (sessionId) {
+    const existingSession = await options.sessionStore.getSession(sessionId);
+    if (existingSession) {
+      throw createExistingSessionCreateError(existingSession.id);
+    }
+  }
+
+  let createdSession: CliSessionRecord;
+  try {
+    createdSession = await options.sessionStore.createSession(sessionId ?? undefined);
+  } catch (error) {
+    if (sessionId && isExistingSessionCreateError(error)) {
+      throw createExistingSessionCreateError(sessionId);
+    }
+    throw error;
+  }
 
   let session: CliSessionRecord;
   try {
@@ -267,6 +282,16 @@ function readOptionalFlagValue(args: string[], flagName: string): string | null 
   }
 
   return null;
+}
+
+function createExistingSessionCreateError(sessionId: string): Error {
+  return new Error(
+    `Session "${sessionId}" already exists. Use "chrome-controller session use ${sessionId}" to switch to it or "chrome-controller session reset ${sessionId}" to recreate its managed window.`
+  );
+}
+
+function isExistingSessionCreateError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('already exists');
 }
 
 function createSessionHelpLines(): string[] {
