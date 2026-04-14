@@ -71,7 +71,11 @@ async function runListCookiesCommand(
     allowAll: true,
     allowLimit: true,
   });
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
   const cookies = await options.browserService.listCookies(session, scopeToFilter(scope));
   const limitedCookies = cookies.slice(0, parsed.limit);
@@ -108,7 +112,11 @@ async function runGetCookieCommand(
     throw new Error('cookies get does not support --all');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
   const cookie = await options.browserService.getCookie(session, name, scopeToFilter(scope));
 
@@ -140,7 +148,11 @@ async function runSetCookieCommand(
   }
 
   const parsed = parseSetCookieOptions(rest);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const scope = await resolveCookieScope(options.browserService, session, explicitTabId, {
     ...(parsed.url ? { url: parsed.url } : {}),
     ...(parsed.domain ? { domain: parsed.domain } : {}),
@@ -184,7 +196,11 @@ async function runClearCookiesCommand(
     allowAll: true,
   });
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
   const outcome = await options.browserService.clearCookies(session, {
     ...scopeToFilter(scope),
@@ -221,7 +237,11 @@ async function runExportCookiesCommand(
   const parsed = parseCookieScopeOptions(rest, {
     allowAll: true,
   });
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const scope = await resolveCookieScope(options.browserService, session, explicitTabId, parsed.scope);
   const cookies = await options.browserService.listCookies(session, scopeToFilter(scope));
   const absolutePath = resolve(filePath);
@@ -270,7 +290,11 @@ async function runImportCookiesCommand(
     throw new Error('cookies import only supports --url and --tab');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const fallbackScope = await resolveCookieScope(
     options.browserService,
     session,

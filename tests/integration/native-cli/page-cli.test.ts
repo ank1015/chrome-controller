@@ -319,7 +319,7 @@ describe('native CLI page commands', () => {
       tabId: 102,
       title: 'Docs',
     });
-    expect(browserService.calls).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow')).toEqual([
       {
         method: 'getTab',
         sessionId: 'alpha',
@@ -353,10 +353,17 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {
@@ -392,6 +399,13 @@ describe('native CLI page commands', () => {
       })
     );
     expect(browserService.calls).toEqual([
+      {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
       {
         method: 'getTab',
         sessionId: 's1',
@@ -434,10 +448,17 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {
@@ -468,10 +489,17 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {
@@ -584,10 +612,17 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {
@@ -672,10 +707,17 @@ describe('native CLI page commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {

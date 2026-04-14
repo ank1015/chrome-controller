@@ -7,6 +7,7 @@ import type {
   CliWindowInfo,
 } from '../types.js';
 import { SessionStore } from '../session-store.js';
+import { resolveSession as resolveManagedSession } from './support.js';
 
 interface WindowsCommandOptions {
   args: string[];
@@ -155,8 +156,11 @@ async function runCloseWindowCommand(
 }
 
 async function resolveSession(options: WindowsCommandOptions): Promise<CliSessionRecord> {
-  const result = await options.sessionStore.resolveSession(options.explicitSessionId);
-  return result.session;
+  return await resolveManagedSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
 }
 
 function parseCreateWindowOptions(args: string[]): CliCreateWindowOptions {

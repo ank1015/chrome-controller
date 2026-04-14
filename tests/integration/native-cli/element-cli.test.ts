@@ -232,6 +232,13 @@ describe('native CLI element commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
@@ -241,7 +248,7 @@ describe('native CLI element commands', () => {
       {
         method: 'evaluateTab',
         sessionId: 's1',
-        payload: {
+        payload: expect.objectContaining({
           tabId: 101,
           request: expect.objectContaining({
             selectors: ['button[type="submit"]'],
@@ -249,7 +256,7 @@ describe('native CLI element commands', () => {
             failureMessage:
               'Could not uniquely resolve @e2. The page may have changed or the cached selectors are ambiguous. Run `chrome-controller page snapshot` again.',
           }),
-        },
+        }),
       },
     ]);
   });

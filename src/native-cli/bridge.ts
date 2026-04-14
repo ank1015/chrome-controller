@@ -1,8 +1,8 @@
-import { exec } from 'node:child_process';
 import { connect as tcpConnect } from 'node:net';
 
 import { DEFAULT_PORT, MAX_TCP_MESSAGE_SIZE_BYTES } from '../protocol/constants.js';
 import { ChromeClient } from '../native/client.js';
+import { launchChrome } from './chrome-launcher.js';
 
 import type { Socket } from 'node:net';
 
@@ -14,6 +14,7 @@ export interface ManagedChromeBridgeClient {
 export interface ManagedChromeBridge {
   client: ManagedChromeBridgeClient;
   close(): Promise<void>;
+  launched: boolean;
 }
 
 export interface ConnectChromeBridgeOptions {
@@ -33,7 +34,7 @@ export async function connectManagedChromeBridge(
   const host = options?.host ?? '127.0.0.1';
 
   try {
-    return await tryConnect(port, host, options?.callTimeoutMs);
+    return await tryConnect(port, host, options?.callTimeoutMs, false);
   } catch (error) {
     if (!options?.launch || !isConnectionRefused(error)) {
       throw error;
@@ -48,7 +49,7 @@ export async function connectManagedChromeBridge(
     while (Date.now() < deadline) {
       await sleep(delay);
       try {
-        return await tryConnect(port, host, options?.callTimeoutMs);
+        return await tryConnect(port, host, options?.callTimeoutMs, true);
       } catch (retryError) {
         if (!isConnectionRefused(retryError)) {
           throw retryError;
@@ -68,7 +69,8 @@ export async function connectManagedChromeBridge(
 function tryConnect(
   port: number,
   host: string,
-  callTimeoutMs?: number
+  callTimeoutMs?: number,
+  launched = false
 ): Promise<ManagedChromeBridge> {
   return new Promise<ManagedChromeBridge>((resolve, reject) => {
     const socket = tcpConnect({ port, host });
@@ -107,6 +109,7 @@ function tryConnect(
         close: async (): Promise<void> => {
           await closeSocket(socket);
         },
+        launched,
       });
     };
 
@@ -149,70 +152,6 @@ function isConnectionRefused(error: unknown): boolean {
     'code' in error &&
     (error as NodeJS.ErrnoException).code === 'ECONNREFUSED'
   );
-}
-
-function launchChrome(): Promise<void> {
-  const commands = getChromeLaunchCommands(process.platform);
-  if (commands.length === 0) {
-    return Promise.reject(new Error(`Auto-launch is not supported on ${process.platform}`));
-  }
-
-  return tryLaunchCommands(commands);
-}
-
-function getChromeLaunchCommands(platform: NodeJS.Platform): string[] {
-  if (platform === 'darwin') {
-    return ['open -a "Google Chrome"', 'open -a "Chromium"'];
-  }
-
-  if (platform === 'linux') {
-    return [
-      'google-chrome --no-first-run &',
-      'google-chrome-stable --no-first-run &',
-      'chromium --no-first-run &',
-      'chromium-browser --no-first-run &',
-    ];
-  }
-
-  if (platform === 'win32') {
-    return [
-      'start "" chrome --no-first-run',
-      'start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-      'start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-      'start "" "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-    ];
-  }
-
-  return [];
-}
-
-async function tryLaunchCommands(commands: string[]): Promise<void> {
-  const failures: string[] = [];
-
-  for (const command of commands) {
-    try {
-      await execCommand(command);
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failures.push(`${command}: ${message}`);
-    }
-  }
-
-  throw new Error(`Failed to launch Chrome: ${failures.join(' | ')}`);
-}
-
-function execCommand(command: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    exec(command, { windowsHide: true }, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
 }
 
 function sleep(ms: number): Promise<void> {

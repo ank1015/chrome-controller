@@ -1,5 +1,6 @@
 import { SessionStore } from '../session-store.js';
 import { sleep } from '../interaction-support.js';
+import { resolveSession as resolveManagedSession } from './support.js';
 
 import type {
   BrowserService,
@@ -72,9 +73,16 @@ async function runListTabsCommand(
   args: string[],
   options: TabsCommandOptions
 ): Promise<CliCommandResult> {
-  const listOptions = parseListTabsOptions(args);
   const session = await resolveSession(options);
-  const tabs = await options.browserService.listTabs(session, listOptions);
+  const listOptions = parseListTabsOptions(args);
+  const tabs = await options.browserService.listTabs(
+    session,
+    listOptions.windowId === undefined &&
+      listOptions.currentWindow === true &&
+      session.windowId !== null
+      ? { windowId: session.windowId }
+      : listOptions
+  );
 
   return {
     session,
@@ -95,7 +103,9 @@ async function runOpenTabCommand(
   const { tab, createdNewTab, reusedExistingTab } = await openTabWithSettle(
     options.browserService,
     session,
-    openOptions
+    openOptions.windowId === undefined && session.windowId !== null
+      ? { ...openOptions, windowId: session.windowId }
+      : openOptions
   );
 
   return {
@@ -465,7 +475,12 @@ async function runCloseOtherTabsCommand(
 ): Promise<CliCommandResult> {
   const closeOtherOptions = parseCloseOtherTabsOptions(args);
   const session = await resolveSession(options);
-  const outcome = await options.browserService.closeOtherTabs(session, closeOtherOptions);
+  const outcome = await options.browserService.closeOtherTabs(
+    session,
+    closeOtherOptions.windowId === undefined && session.windowId !== null
+      ? { ...closeOtherOptions, windowId: session.windowId }
+      : closeOtherOptions
+  );
 
   return {
     session,
@@ -596,8 +611,11 @@ async function runUngroupTabsCommand(
 }
 
 async function resolveSession(options: TabsCommandOptions): Promise<CliSessionRecord> {
-  const result = await options.sessionStore.resolveSession(options.explicitSessionId);
-  return result.session;
+  return await resolveManagedSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
 }
 
 function parseListTabsOptions(args: string[]): { windowId?: number; currentWindow?: boolean } {

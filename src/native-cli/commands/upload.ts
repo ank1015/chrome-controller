@@ -48,7 +48,11 @@ async function runUploadFilesCommand(
     );
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const result = await options.browserService.uploadFiles(session, tabId, selector, paths);
 

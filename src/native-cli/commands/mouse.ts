@@ -63,7 +63,11 @@ async function runMouseMoveCommand(
 
   const x = parseRequiredFloat(rawX, 'x');
   const y = parseRequiredFloat(rawY, 'y');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await options.browserService.activateTab(session, tabId);
 
@@ -108,7 +112,11 @@ async function runMouseClickCommand(
   const y = parseRequiredFloat(rawY, 'y');
   const button = parsedButton.button;
   const count = parsedCount.value ?? 1;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await options.browserService.activateTab(session, tabId);
 
@@ -149,7 +157,11 @@ async function runMouseButtonCommand(
   const x = parseRequiredFloat(rawX, 'x');
   const y = parseRequiredFloat(rawY, 'y');
   const button = parsedButton.button;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await options.browserService.activateTab(session, tabId);
 
@@ -197,7 +209,11 @@ async function runMouseWheelCommand(
   const deltaY = parseRequiredFloat(rawDeltaY, 'deltaY');
   const x = parsedX.value ?? 0;
   const y = parsedY.value ?? 0;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await options.browserService.activateTab(session, tabId);
 
@@ -246,7 +262,11 @@ async function runMouseDragCommand(
   const toX = parseRequiredFloat(rawToX, 'toX');
   const toY = parseRequiredFloat(rawToY, 'toY');
   const steps = Math.max(1, parsedSteps.value ?? 10);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await options.browserService.activateTab(session, tabId);
 

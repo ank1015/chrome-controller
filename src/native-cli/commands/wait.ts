@@ -83,7 +83,11 @@ async function runWaitElementCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait element');
   const parsed = parseWaitElementArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const target = await resolveElementTarget(options.env, session, tabId, parsed.target);
 
@@ -135,7 +139,11 @@ async function runWaitTextCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait text');
   const parsed = parseWaitTextArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const target = parsed.target
     ? await resolveElementTarget(options.env, session, tabId, parsed.target)
@@ -197,7 +205,11 @@ async function runWaitUrlCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait url');
   const parsed = parseWaitUrlArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   await waitUntil(
@@ -226,7 +238,11 @@ async function runWaitLoadCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait load');
   const parsed = parseCommonWaitArgs(args, 'wait load');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   await waitUntil(
@@ -255,7 +271,11 @@ async function runWaitStableCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait stable');
   const parsed = parseWaitStableArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const stability = await waitForTabStable(options.browserService, session, tabId, {
     timeoutMs: parsed.timeoutMs,
@@ -388,7 +408,11 @@ async function runWaitIdleCommand(
   }
 
   const ms = parsePositiveInteger(rawMs, 'ms');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId =
     explicitTabId !== undefined
       ? await resolveTabId(options.browserService, session, explicitTabId)
@@ -412,7 +436,11 @@ async function runWaitFnCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'wait fn');
   const parsed = parseWaitFnArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   await waitUntil(

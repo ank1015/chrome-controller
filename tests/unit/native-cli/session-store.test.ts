@@ -38,6 +38,7 @@ describe('SessionStore', () => {
     expect(sessions[0]).toMatchObject({
       id: 'alpha',
       current: true,
+      windowId: null,
     });
   });
 
@@ -151,5 +152,26 @@ describe('SessionStore', () => {
     expect(afterPin?.targetTabId).toBe(102);
     expect(cleared.targetTabId).toBeNull();
     expect(afterClear?.targetTabId).toBeNull();
+  });
+
+  it('persists and clears a managed window id on the session record', async () => {
+    const sessionStore = new SessionStore({
+      env: { ...process.env, CHROME_CONTROLLER_HOME: tempHome },
+      now: createNowGenerator(),
+    });
+
+    await sessionStore.createSession('alpha');
+
+    const attached = await sessionStore.setWindow('alpha', 77, {
+      clearTargetTab: true,
+    });
+    const afterAttach = await sessionStore.getSession('alpha');
+    const cleared = await sessionStore.clearWindow('alpha');
+    const afterClear = await sessionStore.getSession('alpha');
+
+    expect(attached.windowId).toBe(77);
+    expect(afterAttach?.windowId).toBe(77);
+    expect(cleared.windowId).toBeNull();
+    expect(afterClear?.windowId).toBeNull();
   });
 });

@@ -56,7 +56,11 @@ async function runAttachCommand(
     throw new Error(`Unknown argument for debugger attach: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const result = await options.browserService.attachDebugger(session, tabId);
 
@@ -83,7 +87,11 @@ async function runDetachCommand(
     throw new Error(`Unknown argument for debugger detach: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const result = await options.browserService.detachDebugger(session, tabId);
 
@@ -103,7 +111,11 @@ async function runCmdCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'debugger cmd');
   const parsed = parseCmdOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const result = await options.browserService.sendDebuggerCommand(
     session,
@@ -129,7 +141,11 @@ async function runEventsCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'debugger events');
   const parsed = parseEventsOptions(args, 'debugger events');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const events = await options.browserService.getDebuggerEvents(session, tabId, {
     ...(parsed.filter ? { filter: parsed.filter } : {}),
@@ -163,7 +179,11 @@ async function runClearEventsCommand(
     allowLimit: false,
     allowClear: false,
   });
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const clearedEvents = await options.browserService.getDebuggerEvents(session, tabId, {
     ...(parsed.filter ? { filter: parsed.filter } : {}),

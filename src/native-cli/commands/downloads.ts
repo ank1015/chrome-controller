@@ -48,7 +48,11 @@ async function runListDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const parsed = parseDownloadsQueryOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const downloads = await options.browserService.listDownloads(session, parsed.filter);
   const limitedDownloads = downloads.slice(0, parsed.limit);
 
@@ -70,7 +74,11 @@ async function runWaitForDownloadCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const parsed = parseDownloadsWaitOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const download = await options.browserService.waitForDownload(session, parsed.filter, {
     timeoutMs: parsed.timeoutMs,
     pollIntervalMs: parsed.pollIntervalMs,
@@ -92,7 +100,11 @@ async function runCancelDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const downloadIds = parseDownloadIds(args, 'cancel');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   await options.browserService.cancelDownloads(session, downloadIds);
 
   return {
@@ -110,7 +122,11 @@ async function runEraseDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const downloadIds = parseDownloadIds(args, 'erase');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   await options.browserService.eraseDownloads(session, downloadIds);
 
   return {

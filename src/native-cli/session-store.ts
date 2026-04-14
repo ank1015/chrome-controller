@@ -56,6 +56,7 @@ export class SessionStore {
       createdAt: timestamp,
       updatedAt: timestamp,
       lastUsedAt: timestamp,
+      windowId: null,
       targetTabId: null,
     };
 
@@ -276,6 +277,37 @@ export class SessionStore {
     });
   }
 
+  async setWindow(
+    id: string,
+    windowId: number,
+    options: { clearTargetTab?: boolean } = {}
+  ): Promise<CliSessionRecord> {
+    const session = await this.getSession(id);
+    if (!session) {
+      throw new Error(`Session "${id}" does not exist`);
+    }
+
+    return await this.writeUpdatedSession(session, {
+      windowId: normalizeWindowId(windowId),
+      ...(options.clearTargetTab ? { targetTabId: null } : {}),
+    });
+  }
+
+  async clearWindow(
+    id: string,
+    options: { clearTargetTab?: boolean } = {}
+  ): Promise<CliSessionRecord> {
+    const session = await this.getSession(id);
+    if (!session) {
+      throw new Error(`Session "${id}" does not exist`);
+    }
+
+    return await this.writeUpdatedSession(session, {
+      windowId: null,
+      ...(options.clearTargetTab ? { targetTabId: null } : {}),
+    });
+  }
+
   async writeCurrentSession(pointer: CurrentSessionPointer): Promise<void> {
     await this.ensureStorage();
     await writeJsonFile(this.currentSessionPath, pointer);
@@ -373,8 +405,17 @@ function normalizeStoredSession(session: CliSessionRecord, fallbackId: string): 
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastUsedAt: session.lastUsedAt,
+    windowId: normalizeStoredWindowId((session as Partial<CliSessionRecord>).windowId),
     targetTabId: normalizeStoredTargetTabId((session as Partial<CliSessionRecord>).targetTabId),
   };
+}
+
+function normalizeStoredWindowId(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return normalizeWindowId(value);
 }
 
 function normalizeStoredTargetTabId(value: unknown): number | null {
@@ -388,6 +429,14 @@ function normalizeStoredTargetTabId(value: unknown): number | null {
 function normalizeTargetTabId(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     throw new Error(`Stored target tab id is invalid: ${String(value)}`);
+  }
+
+  return value;
+}
+
+function normalizeWindowId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`Stored window id is invalid: ${String(value)}`);
   }
 
   return value;

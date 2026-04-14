@@ -52,7 +52,11 @@ async function runListConsoleCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'console list');
   const parsed = parseConsoleListOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
 
@@ -83,7 +87,11 @@ async function runTailConsoleCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'console tail');
   const parsed = parseConsoleTailOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
 
@@ -132,7 +140,11 @@ async function runClearConsoleCommand(
     throw new Error(`Unknown option for console clear: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureConsoleMonitoring(options.browserService, session, tabId);
   const clearedCount = await clearConsoleEntries(options.browserService, session, tabId);

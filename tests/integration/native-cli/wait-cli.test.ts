@@ -369,6 +369,13 @@ describe('native CLI wait commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'getTab',
         sessionId: 's1',
         payload: 101,

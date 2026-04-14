@@ -73,7 +73,11 @@ async function runGetStorageCommand(
   }
 
   const key = args[0];
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   if (key) {
@@ -127,7 +131,11 @@ async function runSetStorageCommand(
     throw new Error(`Too many arguments for storage ${area}-set`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const storedValue = await options.browserService.setStorageValue(session, tabId, area, key, value);
 
@@ -157,7 +165,11 @@ async function runClearStorageCommand(
   }
 
   const key = args[0];
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const outcome = await options.browserService.clearStorage(session, tabId, area, key);
 
@@ -194,7 +206,11 @@ async function runStateSaveCommand(
     throw new Error(`Too many arguments for storage state-save: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const state = await options.browserService.captureStorageState(session, tabId);
   const absolutePath = resolve(filePath);
@@ -230,7 +246,11 @@ async function runStateLoadCommand(
   const absolutePath = resolve(parsed.filePath);
   const rawFile = await readFile(absolutePath, 'utf8');
   const state = parseStorageStateFile(rawFile);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const outcome = await options.browserService.applyStorageState(session, tabId, state);
 

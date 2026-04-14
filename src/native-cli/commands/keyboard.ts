@@ -73,7 +73,11 @@ async function runKeyboardPressCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'keyboard press');
   const parsed = parseKeyAndCount(args, 'keyboard press');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   await options.browserService.activateTab(session, tabId);
@@ -100,7 +104,11 @@ async function runKeyboardTypeCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'keyboard type');
   const parsed = parseKeyboardTypeArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   await options.browserService.activateTab(session, tabId);
@@ -140,7 +148,11 @@ async function runKeyboardDownUpCommand(
     throw new Error(`Unknown option for keyboard ${action}: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const key = normalizeKeyDefinition(keyName);
 

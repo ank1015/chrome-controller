@@ -290,7 +290,7 @@ describe('native CLI find command', () => {
     expect(payload.data.query).toBe('email field');
     expect(payload.data.limit).toBe(30);
     expect(payload.data.resultMarkdown).toContain('## Relevant elements');
-    expect(browserService.calls[0]).toEqual({
+    expect(browserService.calls[1]).toEqual({
       method: 'getTab',
       sessionId: 's1',
       payload: 102,

@@ -57,7 +57,7 @@ describe('native CLI help text', () => {
         'When --tab is omitted, the pinned session target tab is used first.'
       );
       expect(outcome.stdout).toContain(
-        'If no pinned target tab exists, the active tab in the current window is used.'
+        'If no pinned target tab exists, the active tab in the managed session window is used.'
       );
       expect(outcome.stdout).not.toContain(
         'When --tab is omitted, the current active tab in the current window is used.'
@@ -74,7 +74,7 @@ describe('native CLI help text', () => {
       'When no scope is provided, commands use the pinned session target tab URL first.'
     );
     expect(outcome.stdout).toContain(
-      'If no pinned target tab exists, they fall back to the active tab URL in the current window.'
+      'If no pinned target tab exists, they fall back to the active tab URL in the managed session window.'
     );
     expect(outcome.stdout).not.toContain(
       'When no scope is provided, commands default to the current active tab URL.'

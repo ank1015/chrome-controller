@@ -75,7 +75,11 @@ async function runElementActionCommand(
     throw new Error(`Unknown option for element ${action}: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
   const result = parsedRetry.retryStale
@@ -140,7 +144,11 @@ async function runElementValueCommand(
     );
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
   const result = parsedRetry.retryStale
@@ -205,7 +213,11 @@ async function runElementToggleCommand(
     throw new Error(`Unknown option for element ${action}: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
   const result = parsedRetry.retryStale
@@ -256,7 +268,11 @@ async function runElementReadCommand(
     throw new Error(`Unknown option for element ${action}: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
   const result = parsedRetry.retryStale
@@ -316,7 +332,11 @@ async function runElementAttrCommand(
     throw new Error(`Unknown option for element attr: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const resolvedTarget = await resolveElementTarget(options.env, session, tabId, target);
   const result = await retryDetachedOperation(

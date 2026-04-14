@@ -60,23 +60,23 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     throw new Error('getCurrentWindow is not used in tabs CLI tests');
   }
 
-  async getWindow(_session: CliSessionRecord, _windowId: number): Promise<CliWindowInfo> {
-    throw new Error('getWindow is not used in tabs CLI tests');
+  async getWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
+    return await super.getWindow(session, windowId);
   }
 
   async createWindow(
-    _session: CliSessionRecord,
-    _options?: CliCreateWindowOptions
+    session: CliSessionRecord,
+    options?: CliCreateWindowOptions
   ): Promise<CliWindowInfo> {
-    throw new Error('createWindow is not used in tabs CLI tests');
+    return await super.createWindow(session, options);
   }
 
   async focusWindow(_session: CliSessionRecord, _windowId: number): Promise<CliWindowInfo> {
     throw new Error('focusWindow is not used in tabs CLI tests');
   }
 
-  async closeWindow(_session: CliSessionRecord, _windowId: number): Promise<void> {
-    throw new Error('closeWindow is not used in tabs CLI tests');
+  async closeWindow(session: CliSessionRecord, windowId: number): Promise<void> {
+    await super.closeWindow(session, windowId);
   }
 
   async listTabs(
@@ -434,10 +434,17 @@ describe('native CLI tabs commands', () => {
     ]);
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
     ]);
@@ -544,6 +551,13 @@ describe('native CLI tabs commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
@@ -630,12 +644,12 @@ describe('native CLI tabs commands', () => {
     expect(createPayload.sessionId).toBe('linkedin-dm-task1');
     expect(open.exitCode).toBe(0);
     expect(openPayload.sessionId).toBe('linkedin-dm-task1');
-    expect(browserService.calls.slice(-3)).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow').slice(-3)).toEqual([
       {
         method: 'listTabs',
         sessionId: 'linkedin-dm-task1',
         payload: {
-          currentWindow: false,
+          windowId: 11,
         },
       },
       {
@@ -644,6 +658,7 @@ describe('native CLI tabs commands', () => {
         payload: {
           url: 'https://www.linkedin.com/messaging/',
           active: false,
+          windowId: 11,
         },
       },
       {
@@ -700,10 +715,17 @@ describe('native CLI tabs commands', () => {
     expect(payload.data.tab.id).toBe(102);
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: false,
+          windowId: 11,
         },
       },
     ]);
@@ -738,7 +760,7 @@ describe('native CLI tabs commands', () => {
       closed: true,
       tabIds: [201],
     });
-    expect(browserService.calls.slice(-3)).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow').slice(-3)).toEqual([
       {
         method: 'activateTab',
         sessionId: 'alpha',
@@ -801,7 +823,14 @@ describe('native CLI tabs commands', () => {
       expect.objectContaining({ id: 101, groupId: -1 }),
       expect.objectContaining({ id: 102, groupId: -1 }),
     ]);
-    expect(browserService.calls).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow')).toEqual([
+      {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
       {
         method: 'moveTab',
         sessionId: 's1',

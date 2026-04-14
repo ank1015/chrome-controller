@@ -44,7 +44,11 @@ async function runTakeScreenshotCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'screenshot take');
   const parsed = parseScreenshotOptions(args, options.env);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const attachResult = await options.browserService.attachDebugger(session, tabId);
 

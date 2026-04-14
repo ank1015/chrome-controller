@@ -377,6 +377,7 @@ describe('native CLI open command', () => {
       payload: {
         url: 'https://example.com/workspace',
         active: false,
+        windowId: 11,
       },
     });
   });

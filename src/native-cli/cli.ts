@@ -95,6 +95,7 @@ async function dispatchCommand(
         json: context.json,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
       });
     case 'windows':
       return await runWindowsCommand({

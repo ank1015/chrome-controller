@@ -295,6 +295,13 @@ describe('native CLI windows commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listWindows',
         sessionId: 's1',
       },
@@ -377,6 +384,13 @@ describe('native CLI windows commands', () => {
         method: 'createWindow',
         sessionId: 's1',
         payload: {
+          focused: false,
+        },
+      },
+      {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
           url: ['https://example.com', 'https://openai.com'],
           focused: false,
           incognito: true,
@@ -407,7 +421,7 @@ describe('native CLI windows commands', () => {
       closed: true,
       windowId: 44,
     });
-    expect(browserService.calls.slice(-2)).toEqual([
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow').slice(-2)).toEqual([
       {
         method: 'focusWindow',
         sessionId: 'alpha',

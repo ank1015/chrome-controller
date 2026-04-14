@@ -38,11 +38,20 @@ export async function runOpenCommand(
   }
 
   const parsed = parseOpenCommandArgs(options.args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const { tab: openedTab, createdNewTab, reusedExistingTab } = await openTabWithSettle(
     options.browserService,
     session,
-    parsed.openOptions
+    {
+      ...parsed.openOptions,
+      ...(parsed.openOptions.windowId === undefined && session.windowId !== null
+        ? { windowId: session.windowId }
+        : {}),
+    }
   );
 
   if (typeof openedTab.id !== 'number') {

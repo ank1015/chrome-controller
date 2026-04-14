@@ -63,7 +63,11 @@ async function runStartNetworkCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network start');
   const parsed = parseStartNetworkOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const attachResult = await ensureNetworkMonitoring(
     options.browserService,
@@ -94,7 +98,11 @@ async function runStopNetworkCommand(
     throw new Error(`Unknown option for network stop: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   try {
@@ -130,7 +138,11 @@ async function runListNetworkCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network list');
   const parsed = parseNetworkListOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const requests = filterNetworkRequests(summarizeNetworkRequests(events), parsed);
@@ -162,7 +174,11 @@ async function runGetNetworkRequestCommand(
     throw new Error(`Unknown option for network get: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const result = findNetworkRequest(events, requestId);
@@ -191,7 +207,11 @@ async function runSummaryNetworkCommand(
     throw new Error(`Unknown option for network summary: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const requests = summarizeNetworkRequests(events);
@@ -216,7 +236,11 @@ async function runClearNetworkCommand(
     throw new Error(`Unknown option for network clear: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   try {
@@ -261,7 +285,11 @@ async function runExportHarCommand(
     throw new Error(`Unknown option for network export-har: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const har = buildHar(events);
@@ -290,7 +318,11 @@ async function runBlockNetworkCommand(
     throw new Error('Usage: chrome-controller network block <pattern...> [--tab <id>]');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(session, tabId, 'Network.setBlockedURLs', {
@@ -316,7 +348,11 @@ async function runUnblockNetworkCommand(
     throw new Error('network unblock does not take patterns; it clears all blocked URLs');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(session, tabId, 'Network.setBlockedURLs', {
@@ -343,7 +379,11 @@ async function runOfflineNetworkCommand(
     throw new Error('Usage: chrome-controller network offline <on|off> [--tab <id>]');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(
@@ -386,7 +426,11 @@ async function runThrottleNetworkCommand(
   }
 
   const config = getThrottlePreset(preset);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(

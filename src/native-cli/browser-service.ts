@@ -30,6 +30,37 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_POLL_MS = 250;
 
 export class ChromeBrowserService implements BrowserService {
+  async createManagedSessionWindow(session: CliSessionRecord): Promise<CliWindowInfo> {
+    const bridge = await connectManagedChromeBridge({
+      launch: true,
+    });
+
+    try {
+      const launchWindows = bridge.launched
+        ? await this.listBridgeWindows(bridge)
+        : [];
+      const adoptableWindow = selectAdoptableLaunchWindow(launchWindows);
+
+      if (adoptableWindow) {
+        return adoptableWindow;
+      }
+
+      const createdWindow = normalizeWindow(
+        await bridge.client.call<RawWindow>('windows.create', {
+          focused: false,
+        })
+      );
+
+      if (bridge.launched && typeof createdWindow.id === 'number') {
+        await this.closeDisposableLaunchWindows(bridge, launchWindows, createdWindow.id);
+      }
+
+      return createdWindow;
+    } finally {
+      await bridge.close();
+    }
+  }
+
   async listWindows(_session: CliSessionRecord): Promise<CliWindowInfo[]> {
     const windows = await this.callChrome<RawWindow[]>('windows.getAll', {
       populate: true,
@@ -701,6 +732,33 @@ export class ChromeBrowserService implements BrowserService {
     }
   }
 
+  private async listBridgeWindows(
+    bridge: Awaited<ReturnType<typeof connectManagedChromeBridge>>
+  ): Promise<CliWindowInfo[]> {
+    const windows = await bridge.client.call<RawWindow[]>('windows.getAll', {
+      populate: true,
+    });
+    return windows.map((window) => normalizeWindow(window));
+  }
+
+  private async closeDisposableLaunchWindows(
+    bridge: Awaited<ReturnType<typeof connectManagedChromeBridge>>,
+    windows: CliWindowInfo[],
+    keepWindowId: number
+  ): Promise<void> {
+    for (const window of windows) {
+      if (window.id === keepWindowId || !isDisposableLaunchWindow(window)) {
+        continue;
+      }
+
+      try {
+        await bridge.client.call('windows.remove', window.id);
+      } catch {
+        // The startup window may already be gone by the time cleanup runs.
+      }
+    }
+  }
+
   private async updateTabsBooleanState(
     session: CliSessionRecord,
     tabIds: number[],
@@ -827,6 +885,46 @@ function normalizeBounds(window: RawWindow): CliWindowBounds {
     width: typeof window.width === 'number' ? window.width : null,
     height: typeof window.height === 'number' ? window.height : null,
   };
+}
+
+function selectAdoptableLaunchWindow(windows: CliWindowInfo[]): CliWindowInfo | null {
+  const adoptableWindows = windows.filter((window) => isDisposableLaunchWindow(window));
+  if (adoptableWindows.length !== 1) {
+    return null;
+  }
+
+  return adoptableWindows[0] ?? null;
+}
+
+function isDisposableLaunchWindow(window: CliWindowInfo): boolean {
+  if (typeof window.id !== 'number') {
+    return false;
+  }
+
+  if (window.type !== null && window.type !== 'normal') {
+    return false;
+  }
+
+  if (window.tabCount !== 1) {
+    return false;
+  }
+
+  const activeTab = window.activeTab ?? window.tabs[0] ?? null;
+  return isDisposableLaunchUrl(activeTab?.url ?? null);
+}
+
+function isDisposableLaunchUrl(url: string | null): boolean {
+  if (url === null) {
+    return true;
+  }
+
+  const normalized = url.trim().replace(/\/+$/, '');
+  return (
+    normalized === 'about:blank'
+    || normalized === 'chrome://newtab'
+    || normalized === 'chrome://new-tab-page'
+    || normalized === 'chrome-native://newtab'
+  );
 }
 
 function parseTabUrl(url: string | null): URL | null {

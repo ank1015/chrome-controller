@@ -3,6 +3,7 @@ export interface CliSessionRecord {
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string;
+  windowId: number | null;
   targetTabId: number | null;
 }
 

@@ -24,7 +24,11 @@ export async function runFindCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(options.args, 'find');
   const parsed = parseFindArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
 
   const rawSnapshot = await captureStablePageSnapshot(options.browserService, session, tabId);

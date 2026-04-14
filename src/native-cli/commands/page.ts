@@ -74,7 +74,11 @@ async function runGotoPageCommand(
     throw new Error(`Unknown option for page goto: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tab = await resolveTab(options.browserService, session, explicitTabId);
   const updatedTab = await options.browserService.navigateTab(session, tab.id, url);
   const resolvedTab = await resolveNavigatedTab(
@@ -104,7 +108,11 @@ async function runPageUrlCommand(
     throw new Error(`Unknown option for page url: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tab = await resolveTab(options.browserService, session, explicitTabId);
 
   return {
@@ -126,7 +134,11 @@ async function runPageTitleCommand(
     throw new Error(`Unknown option for page title: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tab = await resolveTab(options.browserService, session, explicitTabId);
 
   return {
@@ -148,7 +160,11 @@ async function runPageTextCommand(
     throw new Error(`Unknown option for page text: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const rawTextCapture = await captureStablePageText(options.browserService, session, tabId);
   const pageMarkdown = createPageMarkdown(rawTextCapture);
@@ -171,7 +187,11 @@ async function runPageEvalCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page eval');
   const parsed = parsePageEvalArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const result = await options.browserService.evaluateTab(session, tabId, parsed.code, {
     ...(parsed.awaitPromise ? { awaitPromise: true } : {}),
@@ -197,7 +217,11 @@ async function runPageSnapshotCommand(
     throw new Error(`Unknown option for page snapshot: ${args[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const rawSnapshot = await captureStablePageSnapshot(options.browserService, session, tabId);
   const snapshotRecord = createPageSnapshotRecord({
@@ -235,7 +259,11 @@ async function runPagePdfCommand(
 ): Promise<CliCommandResult> {
   const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'page pdf');
   const parsed = parsePagePdfArgs(args, options.env);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const tabId = await resolveTabId(options.browserService, session, explicitTabId);
   const pdf = await options.browserService.printToPdf(session, tabId, {
     ...(parsed.landscape ? { landscape: true } : {}),

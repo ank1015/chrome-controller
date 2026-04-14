@@ -1,13 +1,57 @@
 import { SessionStore } from '../session-store.js';
 
-import type { BrowserService, CliSessionRecord } from '../types.js';
+import type { BrowserService, CliSessionRecord, CliWindowInfo } from '../types.js';
 
 export async function resolveSession(
   sessionStore: SessionStore,
+  browserService: BrowserService,
   explicitSessionId?: string
 ): Promise<CliSessionRecord> {
   const result = await sessionStore.resolveSession(explicitSessionId);
-  return result.session;
+  return await ensureSessionWindow(sessionStore, browserService, result.session);
+}
+
+export async function ensureSessionWindow(
+  sessionStore: SessionStore,
+  browserService: BrowserService,
+  session: CliSessionRecord
+): Promise<CliSessionRecord> {
+  if (typeof session.windowId === 'number') {
+    try {
+      const window = await browserService.getWindow(session, session.windowId);
+      if (typeof window.id === 'number') {
+        return session;
+      }
+    } catch {
+      // Fall through to recreate the missing managed window.
+    }
+  }
+
+  const window = await createManagedSessionWindow(browserService, session);
+  if (typeof window.id !== 'number') {
+    throw new Error(`Could not create a managed window for session ${session.id}`);
+  }
+
+  return await sessionStore.setWindow(session.id, window.id, {
+    clearTargetTab: true,
+  });
+}
+
+export async function createManagedSessionWindow(
+  browserService: BrowserService,
+  session: CliSessionRecord
+): Promise<CliWindowInfo> {
+  const managedBrowserService = browserService as BrowserService & {
+    createManagedSessionWindow?: (session: CliSessionRecord) => Promise<CliWindowInfo>;
+  };
+
+  if (typeof managedBrowserService.createManagedSessionWindow === 'function') {
+    return await managedBrowserService.createManagedSessionWindow(session);
+  }
+
+  return await browserService.createWindow(session, {
+    focused: false,
+  });
 }
 
 export async function resolveTabId(
@@ -44,6 +88,12 @@ export async function resolveTab(
         throw new Error(`Could not resolve tab ${session.targetTabId}`);
       }
 
+      if (typeof session.windowId === 'number' && tab.windowId !== session.windowId) {
+        throw new Error(
+          `Pinned target tab ${session.targetTabId} is no longer in managed window ${session.windowId}`
+        );
+      }
+
       return {
         id: tab.id,
         url: tab.url,
@@ -57,12 +107,19 @@ export async function resolveTab(
     }
   }
 
-  const tabs = await browserService.listTabs(session, {
-    currentWindow: true,
-  });
+  const tabs = await browserService.listTabs(
+    session,
+    typeof session.windowId === 'number'
+      ? { windowId: session.windowId }
+      : { currentWindow: true }
+  );
   const activeTab = tabs.find((tab) => tab.active && typeof tab.id === 'number');
 
   if (!activeTab || typeof activeTab.id !== 'number') {
+    if (typeof session.windowId === 'number') {
+      throw new Error(`Could not resolve an active tab in managed window ${session.windowId}`);
+    }
+
     throw new Error('Could not resolve an active tab in the current window');
   }
 
@@ -76,14 +133,14 @@ export async function resolveTab(
 export function createImplicitTabResolutionHelpLines(): string[] {
   return [
     '  When --tab is omitted, the pinned session target tab is used first.',
-    '  If no pinned target tab exists, the active tab in the current window is used.',
+    '  If no pinned target tab exists, the active tab in the managed session window is used.',
   ];
 }
 
 export function createImplicitTabUrlScopeHelpLines(): string[] {
   return [
     '  When no scope is provided, commands use the pinned session target tab URL first.',
-    '  If no pinned target tab exists, they fall back to the active tab URL in the current window.',
+    '  If no pinned target tab exists, they fall back to the active tab URL in the managed session window.',
   ];
 }
 
