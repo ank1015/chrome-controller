@@ -1,3 +1,0 @@
-Testing Chrome Controller attachment
-
-This file was created during a real CLI task run.
