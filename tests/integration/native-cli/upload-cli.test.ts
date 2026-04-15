@@ -39,7 +39,7 @@ function createTab(overrides: Partial<CliTabInfo> = {}): CliTabInfo {
 class MockBrowserService extends BaseMockBrowserService implements BrowserService {
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -139,10 +139,17 @@ describe('native CLI upload commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {

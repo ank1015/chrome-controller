@@ -1,8 +1,8 @@
-import { exec } from 'node:child_process';
 import { connect as tcpConnect } from 'node:net';
 
 import { DEFAULT_PORT, MAX_TCP_MESSAGE_SIZE_BYTES } from '../protocol/constants.js';
 import { ChromeClient } from '../native/client.js';
+import { launchChrome } from './chrome-launcher.js';
 
 import type { Socket } from 'node:net';
 
@@ -14,6 +14,7 @@ export interface ManagedChromeBridgeClient {
 export interface ManagedChromeBridge {
   client: ManagedChromeBridgeClient;
   close(): Promise<void>;
+  launched: boolean;
 }
 
 export interface ConnectChromeBridgeOptions {
@@ -22,21 +23,33 @@ export interface ConnectChromeBridgeOptions {
   launch?: boolean;
   launchTimeout?: number;
   callTimeoutMs?: number;
+  connectTimeoutMs?: number;
 }
 
-const DEFAULT_LAUNCH_TIMEOUT = 30_000;
+const DEFAULT_LAUNCH_TIMEOUT = 12_000;
+const DEFAULT_CONNECT_TIMEOUT = 2_000;
 
 export async function connectManagedChromeBridge(
   options?: ConnectChromeBridgeOptions
 ): Promise<ManagedChromeBridge> {
   const port = options?.port ?? DEFAULT_PORT;
   const host = options?.host ?? '127.0.0.1';
+  const connectTimeoutMs = options?.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT;
 
   try {
-    return await tryConnect(port, host, options?.callTimeoutMs);
+    return await tryConnect(port, host, options?.callTimeoutMs, connectTimeoutMs, false);
   } catch (error) {
-    if (!options?.launch || !isConnectionRefused(error)) {
+    if (!isBridgeUnavailableError(error)) {
       throw error;
+    }
+
+    if (!options?.launch) {
+      throw createBridgeUnavailableError({
+        host,
+        port,
+        launched: false,
+        connectTimeoutMs,
+      });
     }
 
     await launchChrome();
@@ -48,9 +61,9 @@ export async function connectManagedChromeBridge(
     while (Date.now() < deadline) {
       await sleep(delay);
       try {
-        return await tryConnect(port, host, options?.callTimeoutMs);
+        return await tryConnect(port, host, options?.callTimeoutMs, connectTimeoutMs, true);
       } catch (retryError) {
-        if (!isConnectionRefused(retryError)) {
+        if (!isBridgeUnavailableError(retryError)) {
           throw retryError;
         }
       }
@@ -58,28 +71,62 @@ export async function connectManagedChromeBridge(
       delay = Math.min(delay * 2, 2_000);
     }
 
-    throw new Error(
-      `Chrome did not become available on ${host}:${port} within ${timeout}ms. ` +
-        'Ensure the extension is installed and the native host is registered.'
-    );
+    throw createBridgeUnavailableError({
+      host,
+      port,
+      launched: true,
+      launchTimeoutMs: timeout,
+      connectTimeoutMs,
+    });
   }
 }
 
 function tryConnect(
   port: number,
   host: string,
-  callTimeoutMs?: number
+  callTimeoutMs?: number,
+  connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT,
+  launched = false
 ): Promise<ManagedChromeBridge> {
   return new Promise<ManagedChromeBridge>((resolve, reject) => {
     const socket = tcpConnect({ port, host });
+    socket.setTimeout(connectTimeoutMs);
 
-    const handleError = (error: Error): void => {
+    let settled = false;
+
+    const cleanup = (): void => {
+      socket.removeListener('error', handleError);
       socket.removeListener('connect', handleConnect);
+      socket.removeListener('timeout', handleTimeout);
+    };
+
+    const fail = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      socket.destroy();
       reject(error);
     };
 
+    const handleError = (error: Error): void => {
+      fail(error);
+    };
+
+    const handleTimeout = (): void => {
+      fail(createBridgeConnectTimeoutError(host, port, connectTimeoutMs));
+    };
+
     const handleConnect = (): void => {
-      socket.removeListener('error', handleError);
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      socket.setTimeout(0);
 
       const client = new ChromeClient({
         input: socket,
@@ -107,11 +154,13 @@ function tryConnect(
         close: async (): Promise<void> => {
           await closeSocket(socket);
         },
+        launched,
       });
     };
 
     socket.once('error', handleError);
     socket.once('connect', handleConnect);
+    socket.once('timeout', handleTimeout);
   });
 }
 
@@ -151,68 +200,52 @@ function isConnectionRefused(error: unknown): boolean {
   );
 }
 
-function launchChrome(): Promise<void> {
-  const commands = getChromeLaunchCommands(process.platform);
-  if (commands.length === 0) {
-    return Promise.reject(new Error(`Auto-launch is not supported on ${process.platform}`));
-  }
-
-  return tryLaunchCommands(commands);
+function isConnectionTimedOut(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+  );
 }
 
-function getChromeLaunchCommands(platform: NodeJS.Platform): string[] {
-  if (platform === 'darwin') {
-    return ['open -a "Google Chrome"', 'open -a "Chromium"'];
-  }
-
-  if (platform === 'linux') {
-    return [
-      'google-chrome --no-first-run &',
-      'google-chrome-stable --no-first-run &',
-      'chromium --no-first-run &',
-      'chromium-browser --no-first-run &',
-    ];
-  }
-
-  if (platform === 'win32') {
-    return [
-      'start "" chrome --no-first-run',
-      'start "" "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-      'start "" "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-      'start "" "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" --no-first-run',
-    ];
-  }
-
-  return [];
+function isBridgeUnavailableError(error: unknown): boolean {
+  return isConnectionRefused(error) || isConnectionTimedOut(error);
 }
 
-async function tryLaunchCommands(commands: string[]): Promise<void> {
-  const failures: string[] = [];
-
-  for (const command of commands) {
-    try {
-      await execCommand(command);
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failures.push(`${command}: ${message}`);
-    }
-  }
-
-  throw new Error(`Failed to launch Chrome: ${failures.join(' | ')}`);
+function createBridgeConnectTimeoutError(
+  host: string,
+  port: number,
+  timeoutMs: number
+): Error {
+  const error = new Error(
+    `Timed out connecting to the Chrome bridge on ${host}:${port} after ${timeoutMs}ms`
+  ) as NodeJS.ErrnoException;
+  error.code = 'ETIMEDOUT';
+  return error;
 }
 
-function execCommand(command: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    exec(command, { windowsHide: true }, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+function createBridgeUnavailableError(options: {
+  host: string;
+  port: number;
+  launched: boolean;
+  connectTimeoutMs: number;
+  launchTimeoutMs?: number;
+}): Error {
+  if (options.launched) {
+    return new Error(
+      `Chrome opened, but the chrome-controller bridge did not become available on ${options.host}:${options.port} ` +
+        `within ${options.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT}ms. ` +
+        'Ensure the extension is installed and enabled in the selected Chrome profile, and that the native host is registered. ' +
+        'Run `chrome-controller setup` to choose a profile and install the extension.'
+    );
+  }
 
-      resolve();
-    });
-  });
+  return new Error(
+    `Could not connect to the chrome-controller bridge on ${options.host}:${options.port}. ` +
+      `The bridge did not respond within ${options.connectTimeoutMs}ms or refused the connection. ` +
+      'Ensure Chrome is running with the extension installed and enabled in the selected profile, and that the native host is registered. ' +
+      'Run `chrome-controller setup` to choose a profile and install the extension.'
+  );
 }
 
 function sleep(ms: number): Promise<void> {

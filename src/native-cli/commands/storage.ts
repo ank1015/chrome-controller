@@ -5,10 +5,7 @@ import { CliPartialResultError } from '../command-error.js';
 import { SessionStore } from '../session-store.js';
 
 import {
-  createImplicitTabResolutionHelpLines,
-  parseOptionalTabFlag,
-  resolveSession,
-  resolveTabId,
+  resolveManagedCurrentTab,
 } from './support.js';
 
 import type {
@@ -64,17 +61,13 @@ async function runGetStorageCommand(
   rawArgs: string[],
   options: StorageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(
-    rawArgs,
-    `storage ${area}-get`
-  );
+  const args = rawArgs;
   if (args.length > 1) {
     throw new Error(`Too many arguments for storage ${area}-get`);
   }
 
   const key = args[0];
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveStorageTab(options);
 
   if (key) {
     const value = await options.browserService.getStorageValue(session, tabId, area, key);
@@ -113,22 +106,15 @@ async function runSetStorageCommand(
   rawArgs: string[],
   options: StorageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(
-    rawArgs,
-    `storage ${area}-set`
-  );
-  const [key, value, ...rest] = args;
+  const [key, value, ...rest] = rawArgs;
   if (!key || value === undefined) {
-    throw new Error(
-      `Usage: chrome-controller storage ${area}-set <key> <value> [--tab <id>]`
-    );
+    throw new Error(`Usage: chrome-controller state ${area} set <key> <value>`);
   }
   if (rest.length > 0) {
     throw new Error(`Too many arguments for storage ${area}-set`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveStorageTab(options);
   const storedValue = await options.browserService.setStorageValue(session, tabId, area, key, value);
 
   return {
@@ -148,17 +134,13 @@ async function runClearStorageCommand(
   rawArgs: string[],
   options: StorageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(
-    rawArgs,
-    `storage ${area}-clear`
-  );
+  const args = rawArgs;
   if (args.length > 1) {
     throw new Error(`Too many arguments for storage ${area}-clear`);
   }
 
   const key = args[0];
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveStorageTab(options);
   const outcome = await options.browserService.clearStorage(session, tabId, area, key);
 
   return {
@@ -183,19 +165,15 @@ async function runStateSaveCommand(
   rawArgs: string[],
   options: StorageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'storage state-save');
-  const [filePath, ...rest] = args;
+  const [filePath, ...rest] = rawArgs;
   if (!filePath) {
-    throw new Error(
-      'Usage: chrome-controller storage state-save <path> [--tab <id>]'
-    );
+    throw new Error('Usage: chrome-controller state save <path>');
   }
   if (rest.length > 0) {
     throw new Error(`Too many arguments for storage state-save: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveStorageTab(options);
   const state = await options.browserService.captureStorageState(session, tabId);
   const absolutePath = resolve(filePath);
   const snapshot: CliStorageState = {
@@ -225,13 +203,11 @@ async function runStateLoadCommand(
   rawArgs: string[],
   options: StorageCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'storage state-load');
-  const parsed = parseStateLoadOptions(args);
+  const parsed = parseStateLoadOptions(rawArgs);
   const absolutePath = resolve(parsed.filePath);
   const rawFile = await readFile(absolutePath, 'utf8');
   const state = parseStorageStateFile(rawFile);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveStorageTab(options);
   const outcome = await options.browserService.applyStorageState(session, tabId, state);
 
   if (parsed.reload) {
@@ -273,12 +249,29 @@ async function runStateLoadCommand(
   };
 }
 
+async function resolveStorageTab(
+  options: StorageCommandOptions
+): Promise<{ session: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['session']; tabId: number }> {
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve the active session tab for session ${session.id}`);
+  }
+
+  return {
+    session,
+    tabId: tab.id,
+  };
+}
+
 function parseStateLoadOptions(args: string[]): { filePath: string; reload: boolean } {
   const [filePath, ...rest] = args;
   if (!filePath) {
-    throw new Error(
-      'Usage: chrome-controller storage state-load <path> [--reload] [--tab <id>]'
-    );
+    throw new Error('Usage: chrome-controller state load <path> [--reload]');
   }
 
   let reload = false;
@@ -404,17 +397,17 @@ function createStorageHelpLines(): string[] {
   return [
     'Storage commands',
     '',
-    'Usage:',
-    '  chrome-controller storage local-get [key] [--tab <id>]',
-    '  chrome-controller storage local-set <key> <value> [--tab <id>]',
-    '  chrome-controller storage local-clear [key] [--tab <id>]',
-    '  chrome-controller storage session-get [key] [--tab <id>]',
-    '  chrome-controller storage session-set <key> <value> [--tab <id>]',
-    '  chrome-controller storage session-clear [key] [--tab <id>]',
-    '  chrome-controller storage state-save <path> [--tab <id>]',
-    '  chrome-controller storage state-load <path> [--reload] [--tab <id>]',
+    "All storage commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab storage commands operate on.',
     '',
-    'Notes:',
-    ...createImplicitTabResolutionHelpLines(),
+    'Usage:',
+    '  chrome-controller state local get [key]',
+    '  chrome-controller state local set <key> <value>',
+    '  chrome-controller state local clear [key]',
+    '  chrome-controller state session get [key]',
+    '  chrome-controller state session set <key> <value>',
+    '  chrome-controller state session clear [key]',
+    '  chrome-controller state save <path>',
+    '  chrome-controller state load <path> [--reload]',
   ];
 }

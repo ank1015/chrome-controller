@@ -1,4 +1,5 @@
-import { resolve as resolvePath } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, extname, resolve as resolvePath } from 'node:path';
 import { connectManagedChromeBridge } from './bridge.js';
 
 import type {
@@ -8,6 +9,7 @@ import type {
   CliDownloadInfo,
   CliDownloadsFilter,
   CliCreateWindowOptions,
+  CliUpdateWindowOptions,
   CliDebuggerEvent,
   CliListTabsOptions,
   CliMoveTabOptions,
@@ -30,6 +32,41 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_POLL_MS = 250;
 
 export class ChromeBrowserService implements BrowserService {
+  async callBrowserMethod(method: string, ...args: unknown[]): Promise<unknown> {
+    return await this.callChrome(method, ...args);
+  }
+
+  async createManagedSessionWindow(session: CliSessionRecord): Promise<CliWindowInfo> {
+    const bridge = await connectManagedChromeBridge({
+      launch: true,
+    });
+
+    try {
+      const launchWindows = bridge.launched
+        ? await this.listBridgeWindows(bridge)
+        : [];
+      const adoptableWindow = selectAdoptableLaunchWindow(launchWindows);
+
+      if (adoptableWindow) {
+        return adoptableWindow;
+      }
+
+      const createdWindow = normalizeWindow(
+        await bridge.client.call<RawWindow>('windows.create', {
+          focused: false,
+        })
+      );
+
+      if (bridge.launched && typeof createdWindow.id === 'number') {
+        await this.closeDisposableLaunchWindows(bridge, launchWindows, createdWindow.id);
+      }
+
+      return createdWindow;
+    } finally {
+      await bridge.close();
+    }
+  }
+
   async listWindows(_session: CliSessionRecord): Promise<CliWindowInfo[]> {
     const windows = await this.callChrome<RawWindow[]>('windows.getAll', {
       populate: true,
@@ -59,11 +96,19 @@ export class ChromeBrowserService implements BrowserService {
     return normalizeWindow(window);
   }
 
-  async focusWindow(_session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
-    const window = await this.callChrome<RawWindow>('windows.update', windowId, {
+  async updateWindow(
+    session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): Promise<CliWindowInfo> {
+    await this.callChrome<RawWindow>('windows.update', windowId, options);
+    return await this.getWindow(session, windowId);
+  }
+
+  async focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
+    return await this.updateWindow(session, windowId, {
       focused: true,
     });
-    return normalizeWindow(window);
   }
 
   async closeWindow(_session: CliSessionRecord, windowId: number): Promise<void> {
@@ -162,10 +207,6 @@ export class ChromeBrowserService implements BrowserService {
     const updatedTab = await this.callChrome<RawTab>('tabs.update', tabId, {
       active: true,
     });
-
-    if (typeof updatedTab.windowId === 'number') {
-      await this.callChrome('windows.update', updatedTab.windowId, { focused: true });
-    }
 
     return normalizeCliTab(updatedTab);
   }
@@ -531,10 +572,35 @@ export class ChromeBrowserService implements BrowserService {
         throw new Error(`Could not resolve file input node for selector: ${selector}`);
       }
 
-      await this.sendDebuggerCommand(session, tabId, 'DOM.setFileInputFiles', {
-        nodeId: node.nodeId,
-        files,
-      });
+      try {
+        await this.sendDebuggerCommand(session, tabId, 'DOM.setFileInputFiles', {
+          nodeId: node.nodeId,
+          files,
+        });
+      } catch (error) {
+        if (!shouldFallbackToSyntheticUpload(error)) {
+          throw error;
+        }
+
+        const syntheticFiles = await readSyntheticUploadFiles(files);
+        const fallbackResult = await this.evaluateOnTab<{
+          assignedCount?: number;
+          names?: string[];
+        }>(
+          tabId,
+          buildSyntheticFileUploadCode(selector, syntheticFiles),
+          {
+            awaitPromise: true,
+            userGesture: true,
+          }
+        );
+
+        if (fallbackResult?.assignedCount !== files.length) {
+          throw new Error(
+            `Synthetic upload fallback assigned ${fallbackResult?.assignedCount ?? 0}/${files.length} files for selector: ${selector}`
+          );
+        }
+      }
     } finally {
       if (!attachResult.alreadyAttached) {
         await this.detachDebugger(session, tabId);
@@ -701,6 +767,33 @@ export class ChromeBrowserService implements BrowserService {
     }
   }
 
+  private async listBridgeWindows(
+    bridge: Awaited<ReturnType<typeof connectManagedChromeBridge>>
+  ): Promise<CliWindowInfo[]> {
+    const windows = await bridge.client.call<RawWindow[]>('windows.getAll', {
+      populate: true,
+    });
+    return windows.map((window) => normalizeWindow(window));
+  }
+
+  private async closeDisposableLaunchWindows(
+    bridge: Awaited<ReturnType<typeof connectManagedChromeBridge>>,
+    windows: CliWindowInfo[],
+    keepWindowId: number
+  ): Promise<void> {
+    for (const window of windows) {
+      if (window.id === keepWindowId || !isDisposableLaunchWindow(window)) {
+        continue;
+      }
+
+      try {
+        await bridge.client.call('windows.remove', window.id);
+      } catch {
+        // The startup window may already be gone by the time cleanup runs.
+      }
+    }
+  }
+
   private async updateTabsBooleanState(
     session: CliSessionRecord,
     tabIds: number[],
@@ -827,6 +920,141 @@ function normalizeBounds(window: RawWindow): CliWindowBounds {
     width: typeof window.width === 'number' ? window.width : null,
     height: typeof window.height === 'number' ? window.height : null,
   };
+}
+
+interface SyntheticUploadFile {
+  name: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+async function readSyntheticUploadFiles(files: string[]): Promise<SyntheticUploadFile[]> {
+  return await Promise.all(
+    files.map(async (filePath) => {
+      const data = await readFile(filePath);
+      return {
+        name: basename(filePath),
+        mimeType: guessMimeType(filePath),
+        dataBase64: data.toString('base64'),
+      };
+    })
+  );
+}
+
+function guessMimeType(filePath: string): string {
+  const extension = extname(filePath).toLowerCase();
+
+  switch (extension) {
+    case '.txt':
+    case '.log':
+    case '.md':
+    case '.csv':
+      return 'text/plain';
+    case '.json':
+      return 'application/json';
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function shouldFallbackToSyntheticUpload(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes('"Not allowed"') || error.message.includes('Not allowed');
+}
+
+function buildSyntheticFileUploadCode(
+  selector: string,
+  files: SyntheticUploadFile[]
+): string {
+  return `(() => {
+    const selector = ${JSON.stringify(selector)};
+    const files = ${JSON.stringify(files)};
+    const input = document.querySelector(selector);
+    if (!(input instanceof HTMLInputElement) || input.type !== 'file') {
+      throw new Error('Selector does not target a file input: ' + selector);
+    }
+
+    const decodeBase64 = (value) => {
+      const binary = atob(value);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    };
+
+    const transfer = new DataTransfer();
+    for (const file of files) {
+      transfer.items.add(
+        new File([decodeBase64(file.dataBase64)], file.name, {
+          type: file.mimeType,
+        })
+      );
+    }
+
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+
+    return {
+      assignedCount: input.files ? input.files.length : 0,
+      names: Array.from(input.files || []).map((file) => file.name),
+    };
+  })()`;
+}
+
+function selectAdoptableLaunchWindow(windows: CliWindowInfo[]): CliWindowInfo | null {
+  const adoptableWindows = windows.filter((window) => isDisposableLaunchWindow(window));
+  if (adoptableWindows.length !== 1) {
+    return null;
+  }
+
+  return adoptableWindows[0] ?? null;
+}
+
+function isDisposableLaunchWindow(window: CliWindowInfo): boolean {
+  if (typeof window.id !== 'number') {
+    return false;
+  }
+
+  if (window.type !== null && window.type !== 'normal') {
+    return false;
+  }
+
+  if (window.tabCount !== 1) {
+    return false;
+  }
+
+  const activeTab = window.activeTab ?? window.tabs[0] ?? null;
+  return isDisposableLaunchUrl(activeTab?.url ?? null);
+}
+
+function isDisposableLaunchUrl(url: string | null): boolean {
+  if (url === null) {
+    return true;
+  }
+
+  const normalized = url.trim().replace(/\/+$/, '');
+  return (
+    normalized === 'about:blank'
+    || normalized === 'chrome://newtab'
+    || normalized === 'chrome://new-tab-page'
+    || normalized === 'chrome-native://newtab'
+  );
 }
 
 function parseTabUrl(url: string | null): URL | null {

@@ -1,6 +1,6 @@
 {
   "name": "@ank1015/chrome-controller",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and CLI",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,7 +16,10 @@
   },
   "files": [
     "dist",
+    "docs",
     "manifests",
+    "install_ext_and_restart_chrome_mac.sh",
+    "install_ext_and_restart_chrome_windows.ps1",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -46,6 +49,7 @@
     "@vitest/coverage-v8": "^2.1.0",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
+    "typescript": "^5.8.3",
     "vitest": "^2.1.0"
   },
   "keywords": [

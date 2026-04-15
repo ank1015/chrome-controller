@@ -1,11 +1,10 @@
 import { SessionStore } from '../session-store.js';
 import { sleep } from '../interaction-support.js';
+import { resolveSession as resolveManagedSession } from './support.js';
 
 import type {
   BrowserService,
-  CliCloseOtherTabsOptions,
   CliCommandResult,
-  CliMoveTabOptions,
   CliOpenTabOptions,
   CliSessionRecord,
   CliTabInfo,
@@ -18,6 +17,11 @@ interface TabsCommandOptions {
   browserService: BrowserService;
 }
 
+interface ResolvedManagedTab {
+  session: CliSessionRecord;
+  tab: CliTabInfo;
+}
+
 const OPEN_TAB_LIST_SETTLE_TIMEOUT_MS = 2_000;
 const OPEN_TAB_LIST_SETTLE_POLL_MS = 100;
 
@@ -27,36 +31,20 @@ export async function runTabsCommand(options: TabsCommandOptions): Promise<CliCo
   switch (subcommand) {
     case 'list':
       return await runListTabsCommand(rest, options);
-    case 'open':
-      return await runOpenTabCommand(rest, options);
-    case 'target':
-      return await runTargetTabCommand(rest, options);
-    case 'get':
-      return await runGetTabCommand(rest, options);
-    case 'activate':
-      return await runActivateTabCommand(rest, options);
+    case 'current':
+      return await runCurrentTabCommand(rest, options);
+    case 'new':
+      return await runNewTabCommand(rest, options);
+    case 'use':
+      return await runUseTabCommand(rest, options);
     case 'close':
-      return await runCloseTabsCommand(rest, options);
+      return await runCloseCurrentTabCommand(rest, options);
     case 'close-others':
       return await runCloseOtherTabsCommand(rest, options);
     case 'reload':
       return await runReloadTabCommand(rest, options);
     case 'duplicate':
       return await runDuplicateTabCommand(rest, options);
-    case 'move':
-      return await runMoveTabCommand(rest, options);
-    case 'pin':
-      return await runPinTabsCommand(rest, options);
-    case 'unpin':
-      return await runPinTabsCommand(rest, options, false);
-    case 'mute':
-      return await runMuteTabsCommand(rest, options);
-    case 'unmute':
-      return await runMuteTabsCommand(rest, options, false);
-    case 'group':
-      return await runGroupTabsCommand(rest, options);
-    case 'ungroup':
-      return await runUngroupTabsCommand(rest, options);
     case 'help':
     case '--help':
     case '-h':
@@ -72,41 +60,455 @@ async function runListTabsCommand(
   args: string[],
   options: TabsCommandOptions
 ): Promise<CliCommandResult> {
-  const listOptions = parseListTabsOptions(args);
+  ensureNoArgs(args, 'list');
   const session = await resolveSession(options);
-  const tabs = await options.browserService.listTabs(session, listOptions);
+  const tabs = await listManagedTabs(options.browserService, session);
+  const currentTabId = selectCurrentSessionTab(session, tabs)?.id ?? null;
 
   return {
     session,
     data: {
       tabs,
       count: tabs.length,
+      currentTabId,
     },
-    lines: createTabListLines(tabs),
+    lines: createTabListLines(tabs, currentTabId),
   };
 }
 
-async function runOpenTabCommand(
+async function runCurrentTabCommand(
   args: string[],
   options: TabsCommandOptions
 ): Promise<CliCommandResult> {
-  const openOptions = parseOpenTabOptions(args);
-  const session = await resolveSession(options);
-  const { tab, createdNewTab, reusedExistingTab } = await openTabWithSettle(
-    options.browserService,
-    session,
-    openOptions
-  );
+  ensureNoArgs(args, 'current');
+  const { session, tab } = await resolveManagedTab(options, {
+    syncTargetTab: true,
+  });
 
   return {
     session,
     data: {
       tab,
-      createdNewTab,
-      reusedExistingTab,
+      currentTabId: tab.id ?? null,
     },
-    lines: [formatTabActionLine(reusedExistingTab ? 'Reused' : 'Opened', tab)],
+    lines: createTabDetailLines(tab, true),
   };
+}
+
+async function runNewTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  const url = parseOptionalUrlArg(args, 'new [url]');
+  const session = await resolveSession(options);
+  const tab = await options.browserService.openTab(session, {
+    url: url ?? 'about:blank',
+    windowId: requireManagedWindowId(session),
+    active: true,
+  });
+
+  if (typeof tab.id !== 'number') {
+    throw new Error('Could not resolve the new tab id');
+  }
+
+  const updatedSession = await options.sessionStore.setTargetTab(session.id, tab.id);
+  const resolvedTab = await getTabOrFallback(options.browserService, updatedSession, tab.id, tab);
+
+  return {
+    session: updatedSession,
+    data: {
+      tab: resolvedTab,
+      currentTabId: resolvedTab.id ?? null,
+    },
+    lines: [formatTabActionLine('Opened', resolvedTab)],
+  };
+}
+
+async function runUseTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  const tabId = readRequiredTabId(args[0], 'use');
+  ensureNoArgs(args.slice(1), 'use <tabId>');
+
+  const session = await resolveSession(options);
+  const managedWindowId = requireManagedWindowId(session);
+  const tab = await options.browserService.getTab(session, tabId);
+  if (tab.windowId !== managedWindowId) {
+    throw new Error(`Tab ${tabId} is not in managed window ${managedWindowId}`);
+  }
+
+  const activeTab = tab.active ? tab : await options.browserService.activateTab(session, tabId);
+  const updatedSession = await options.sessionStore.setTargetTab(session.id, tabId);
+
+  return {
+    session: updatedSession,
+    data: {
+      tab: activeTab,
+      currentTabId: activeTab.id ?? null,
+    },
+    lines: [formatTabActionLine('Using', activeTab)],
+  };
+}
+
+async function runCloseCurrentTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  ensureNoArgs(args, 'close');
+  const { session, tab } = await resolveManagedTab(options, {
+    syncTargetTab: false,
+  });
+  const tabId = requireTabId(tab, 'close');
+
+  await options.browserService.closeTabs(session, [tabId]);
+  const followUp = await resolveSessionAfterTabChange(options, session);
+
+  return {
+    session: followUp.session,
+    data: {
+      closedTabId: tabId,
+      currentTabId: followUp.tab?.id ?? null,
+      currentTab: followUp.tab,
+    },
+    lines: [formatCloseTabLine(tabId, followUp.tab)],
+  };
+}
+
+async function runCloseOtherTabsCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  ensureNoArgs(args, 'close-others');
+  const { session, tab } = await resolveManagedTab(options, {
+    syncTargetTab: true,
+  });
+  const tabId = requireTabId(tab, 'close-others');
+  const outcome = await options.browserService.closeOtherTabs(session, {
+    windowId: requireManagedWindowId(session),
+    keepTabId: tabId,
+  });
+  const resolvedTab = await getTabOrFallback(options.browserService, session, tabId, tab);
+  const updatedSession =
+    session.targetTabId === tabId
+      ? session
+      : await options.sessionStore.setTargetTab(session.id, tabId);
+
+  return {
+    session: updatedSession,
+    data: {
+      closedTabIds: outcome.closedTabIds,
+      keptTabId: tabId,
+      currentTabId: resolvedTab.id ?? null,
+      tab: resolvedTab,
+    },
+    lines: [formatCloseOtherTabsLine(outcome.closedTabIds, resolvedTab)],
+  };
+}
+
+async function runReloadTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  ensureNoArgs(args, 'reload');
+  const { session, tab } = await resolveManagedTab(options, {
+    syncTargetTab: true,
+  });
+  const tabId = requireTabId(tab, 'reload');
+  const reloadedTab = await options.browserService.reloadTab(session, tabId);
+
+  return {
+    session,
+    data: {
+      tab: reloadedTab,
+      currentTabId: reloadedTab.id ?? null,
+    },
+    lines: [formatTabActionLine('Reloaded', reloadedTab)],
+  };
+}
+
+async function runDuplicateTabCommand(
+  args: string[],
+  options: TabsCommandOptions
+): Promise<CliCommandResult> {
+  ensureNoArgs(args, 'duplicate');
+  const { session, tab } = await resolveManagedTab(options, {
+    syncTargetTab: true,
+  });
+  const sourceTabId = requireTabId(tab, 'duplicate');
+  const duplicatedTab = await options.browserService.duplicateTab(session, sourceTabId);
+
+  if (typeof duplicatedTab.id !== 'number') {
+    throw new Error(`Could not resolve duplicated tab for source tab ${sourceTabId}`);
+  }
+
+  const activeDuplicate = duplicatedTab.active
+    ? duplicatedTab
+    : await options.browserService.activateTab(session, duplicatedTab.id);
+  const updatedSession = await options.sessionStore.setTargetTab(session.id, duplicatedTab.id);
+
+  return {
+    session: updatedSession,
+    data: {
+      sourceTabId,
+      tab: activeDuplicate,
+      currentTabId: activeDuplicate.id ?? null,
+    },
+    lines: [formatDuplicateTabLine(sourceTabId, activeDuplicate)],
+  };
+}
+
+async function resolveSession(options: TabsCommandOptions): Promise<CliSessionRecord> {
+  return await resolveManagedSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+}
+
+async function resolveManagedTab(
+  options: TabsCommandOptions,
+  config: {
+    syncTargetTab: boolean;
+  }
+): Promise<ResolvedManagedTab> {
+  let session = await resolveSession(options);
+  const tabs = await listManagedTabs(options.browserService, session);
+  const selectedTab = selectCurrentSessionTab(session, tabs);
+
+  if (!selectedTab || typeof selectedTab.id !== 'number') {
+    if (session.targetTabId !== null) {
+      session = await options.sessionStore.clearTargetTab(session.id);
+    }
+
+    throw new Error(
+      `Managed window ${session.windowId ?? 'unknown'} has no tabs. Run \`chrome-controller tabs new\`.`
+    );
+  }
+
+  if (config.syncTargetTab && session.targetTabId !== selectedTab.id) {
+    session = await options.sessionStore.setTargetTab(session.id, selectedTab.id);
+  }
+
+  return {
+    session,
+    tab: selectedTab,
+  };
+}
+
+async function resolveSessionAfterTabChange(
+  options: TabsCommandOptions,
+  session: CliSessionRecord
+): Promise<{ session: CliSessionRecord; tab: CliTabInfo | null }> {
+  let updatedSession = session;
+  const remainingTabs = await listManagedTabs(options.browserService, session);
+  const nextTab = selectCurrentSessionTab(session, remainingTabs);
+
+  if (nextTab && typeof nextTab.id === 'number') {
+    updatedSession = await options.sessionStore.setTargetTab(session.id, nextTab.id);
+    return {
+      session: updatedSession,
+      tab: nextTab,
+    };
+  }
+
+  updatedSession = await options.sessionStore.clearTargetTab(session.id);
+  return {
+    session: updatedSession,
+    tab: null,
+  };
+}
+
+async function listManagedTabs(
+  browserService: BrowserService,
+  session: CliSessionRecord
+): Promise<CliTabInfo[]> {
+  return await browserService.listTabs(session, {
+    windowId: requireManagedWindowId(session),
+  });
+}
+
+function selectCurrentSessionTab(
+  session: CliSessionRecord,
+  tabs: CliTabInfo[]
+): CliTabInfo | null {
+  const targetedTab =
+    typeof session.targetTabId === 'number'
+      ? tabs.find((tab) => tab.id === session.targetTabId) ?? null
+      : null;
+  if (targetedTab) {
+    return targetedTab;
+  }
+
+  return tabs.find((tab) => tab.active) ?? tabs[0] ?? null;
+}
+
+function requireManagedWindowId(session: CliSessionRecord): number {
+  if (typeof session.windowId !== 'number') {
+    throw new Error(`Could not resolve a managed window for session ${session.id}`);
+  }
+
+  return session.windowId;
+}
+
+function requireTabId(tab: CliTabInfo, commandName: string): number {
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve a tab id for tabs ${commandName}`);
+  }
+
+  return tab.id;
+}
+
+function parseOptionalUrlArg(args: string[], usage: string): string | null {
+  if (args.length === 0) {
+    return null;
+  }
+
+  if (args.length > 1) {
+    throw new Error(`Usage: chrome-controller tabs ${usage}`);
+  }
+
+  const value = args[0] ?? '';
+  if (value.startsWith('-')) {
+    throw new Error(`Usage: chrome-controller tabs ${usage}`);
+  }
+
+  return value;
+}
+
+function ensureNoArgs(args: string[], usage: string): void {
+  if (args.length > 0) {
+    throw new Error(`Usage: chrome-controller tabs ${usage}`);
+  }
+}
+
+function readRequiredTabId(rawValue: string | undefined, commandName: string): number {
+  if (!rawValue) {
+    throw new Error(`Usage: chrome-controller tabs ${commandName} <tabId>`);
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid tab id: ${rawValue}`);
+  }
+
+  return value;
+}
+
+function createTabsHelpLines(): string[] {
+  return [
+    'Tabs commands',
+    '',
+    "All tabs commands act inside the active session's managed window.",
+    'The session also remembers one current tab for later page-level commands.',
+    '',
+    'Usage:',
+    '  chrome-controller tabs list',
+    '  chrome-controller tabs current',
+    '  chrome-controller tabs new [url]',
+    '  chrome-controller tabs use <tabId>',
+    '  chrome-controller tabs close',
+    '  chrome-controller tabs close-others',
+    '  chrome-controller tabs reload',
+    '  chrome-controller tabs duplicate',
+    '',
+    'Notes:',
+    '  `tabs new` always opens a fresh tab in the managed window and makes it the current tab.',
+    '  `tabs use` switches to an existing tab in the managed window and makes it the current tab.',
+    '  Use top-level `open <url>` when you want to reuse an already-open exact URL match instead of always creating a fresh tab.',
+  ];
+}
+
+function createTabListLines(tabs: CliTabInfo[], currentTabId: number | null): string[] {
+  if (tabs.length === 0) {
+    return ['No tabs found in the managed session window'];
+  }
+
+  const lines = ['Tabs'];
+  for (const tab of tabs) {
+    const isCurrent = typeof currentTabId === 'number' && tab.id === currentTabId;
+    lines.push(
+      `${isCurrent ? '*' : ' '} ${formatTabId(tab)}  active=${tab.active ? 'true' : 'false'}  ${tab.url ?? 'about:blank'}`
+    );
+  }
+
+  return lines;
+}
+
+function createTabDetailLines(tab: CliTabInfo, current: boolean): string[] {
+  return [
+    `Tab ${formatTabId(tab)}`,
+    `Current: ${current ? 'true' : 'false'}`,
+    `Window: ${tab.windowId ?? 'unknown'}`,
+    `Active: ${tab.active ? 'true' : 'false'}`,
+    `Pinned: ${tab.pinned ? 'true' : 'false'}`,
+    `Audible: ${tab.audible ? 'true' : 'false'}`,
+    `Muted: ${tab.muted ? 'true' : 'false'}`,
+    `Index: ${tab.index ?? 'unknown'}`,
+    `Status: ${tab.status ?? 'unknown'}`,
+    `Group: ${tab.groupId ?? 'none'}`,
+    `URL: ${tab.url ?? 'none'}`,
+    `Title: ${tab.title ?? 'none'}`,
+  ];
+}
+
+function formatTabId(tab: CliTabInfo): string {
+  return tab.id === null ? 'unknown' : String(tab.id);
+}
+
+function formatTabActionLine(action: string, tab: CliTabInfo): string {
+  return `${action} ${formatTabSummary(tab)}`;
+}
+
+function formatDuplicateTabLine(sourceTabId: number, tab: CliTabInfo): string {
+  return `Duplicated tab ${sourceTabId} as ${formatTabSummary(tab)}`;
+}
+
+function formatCloseTabLine(closedTabId: number, currentTab: CliTabInfo | null): string {
+  if (!currentTab || typeof currentTab.id !== 'number') {
+    return `Closed tab ${closedTabId}`;
+  }
+
+  return `Closed tab ${closedTabId}; current tab is now ${formatTabSummary(currentTab)}`;
+}
+
+function formatCloseOtherTabsLine(closedTabIds: number[], keptTab: CliTabInfo): string {
+  if (closedTabIds.length === 0) {
+    return `Closed no other tabs; current tab remains ${formatTabSummary(keptTab)}`;
+  }
+
+  if (closedTabIds.length === 1) {
+    return `Closed 1 other tab (${closedTabIds[0]}); current tab remains ${formatTabSummary(keptTab)}`;
+  }
+
+  return `Closed ${closedTabIds.length} other tabs (${closedTabIds.join(', ')}); current tab remains ${formatTabSummary(keptTab)}`;
+}
+
+function formatTabSummary(tab: CliTabInfo): string {
+  const parts = [`tab ${tab.id ?? 'unknown'}`];
+
+  if (tab.title) {
+    parts.push(JSON.stringify(tab.title));
+  }
+
+  if (tab.url) {
+    parts.push(tab.url);
+  }
+
+  return parts.join(' ');
+}
+
+async function getTabOrFallback(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  tabId: number,
+  fallback: CliTabInfo
+): Promise<CliTabInfo> {
+  try {
+    return await browserService.getTab(session, tabId);
+  } catch {
+    return fallback;
+  }
 }
 
 export async function openTabWithSettle(
@@ -257,129 +659,6 @@ function normalizeTabUrlForReuse(url: string | null): string | null {
   }
 }
 
-async function runTargetTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const [subcommand = 'show', ...rest] = args;
-
-  switch (subcommand) {
-    case 'set':
-      return await runSetTargetTabCommand(rest, options);
-    case 'show':
-      return await runShowTargetTabCommand(rest, options);
-    case 'clear':
-      return await runClearTargetTabCommand(rest, options);
-    case 'help':
-    case '--help':
-    case '-h':
-      return {
-        lines: createTargetTabHelpLines(),
-      };
-    default:
-      throw new Error(`Unknown tabs target command: ${subcommand}`);
-  }
-}
-
-async function runSetTargetTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabId = readRequiredTabId(args[0], 'target set');
-  if (args.length > 1) {
-    throw new Error(`Unknown option for tabs target set: ${args[1]}`);
-  }
-
-  const session = await resolveSession(options);
-  const tab = await options.browserService.getTab(session, tabId);
-  const updatedSession = await options.sessionStore.setTargetTab(session.id, tabId);
-
-  return {
-    session: updatedSession,
-    data: {
-      targetTabId: tabId,
-      tab,
-    },
-    lines: [`Pinned target tab ${tabId} for session ${updatedSession.id}`],
-  };
-}
-
-async function runShowTargetTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  if (args.length > 0) {
-    throw new Error(`Unknown option for tabs target show: ${args[0]}`);
-  }
-
-  const session = await resolveSession(options);
-  const targetTabId = session.targetTabId;
-  if (targetTabId === null) {
-    return {
-      session,
-      data: {
-        targetTabId: null,
-        tab: null,
-        stale: false,
-      },
-      lines: [`Session ${session.id} does not have a pinned target tab`],
-    };
-  }
-
-  try {
-    const tab = await options.browserService.getTab(session, targetTabId);
-    return {
-      session,
-      data: {
-        targetTabId,
-        tab,
-        stale: false,
-      },
-      lines: [`Pinned target ${formatTabSummary(tab)}`],
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      session,
-      data: {
-        targetTabId,
-        tab: null,
-        stale: true,
-        error: message,
-      },
-      lines: [
-        `Pinned target tab ${targetTabId} for session ${session.id} could not be resolved`,
-      ],
-    };
-  }
-}
-
-async function runClearTargetTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  if (args.length > 0) {
-    throw new Error(`Unknown option for tabs target clear: ${args[0]}`);
-  }
-
-  const session = await resolveSession(options);
-  const clearedTargetTabId = session.targetTabId;
-  const updatedSession = await options.sessionStore.clearTargetTab(session.id);
-
-  return {
-    session: updatedSession,
-    data: {
-      clearedTargetTabId,
-      targetTabId: updatedSession.targetTabId,
-    },
-    lines: [
-      clearedTargetTabId === null
-        ? `Session ${updatedSession.id} does not have a pinned target tab`
-        : `Cleared pinned target tab ${clearedTargetTabId} for session ${updatedSession.id}`,
-    ],
-  };
-}
-
 async function waitForOpenedTabToAppearInLists(
   browserService: BrowserService,
   session: CliSessionRecord,
@@ -405,583 +684,4 @@ async function waitForOpenedTabToAppearInLists(
   }
 
   return openedTab;
-}
-
-async function runGetTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabId = readRequiredTabId(args[0], 'get');
-  const session = await resolveSession(options);
-  const tab = await options.browserService.getTab(session, tabId);
-
-  return {
-    session,
-    data: {
-      tab,
-    },
-    lines: createTabDetailLines(tab),
-  };
-}
-
-async function runActivateTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabId = readRequiredTabId(args[0], 'activate');
-  const session = await resolveSession(options);
-  const tab = await options.browserService.activateTab(session, tabId);
-
-  return {
-    session,
-    data: {
-      tab,
-    },
-    lines: [formatTabActionLine('Activated', tab)],
-  };
-}
-
-async function runCloseTabsCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabIds = parseRequiredTabIds(args, 'close');
-  const session = await resolveSession(options);
-  await options.browserService.closeTabs(session, tabIds);
-
-  return {
-    session,
-    data: {
-      closed: true,
-      tabIds,
-    },
-    lines: [formatClosedTabsLine(tabIds)],
-  };
-}
-
-async function runCloseOtherTabsCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const closeOtherOptions = parseCloseOtherTabsOptions(args);
-  const session = await resolveSession(options);
-  const outcome = await options.browserService.closeOtherTabs(session, closeOtherOptions);
-
-  return {
-    session,
-    data: outcome,
-    lines: [
-      formatCloseOtherTabsLine(outcome),
-    ],
-  };
-}
-
-async function runReloadTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabId = readRequiredTabId(args[0], 'reload');
-  const session = await resolveSession(options);
-  const tab = await options.browserService.reloadTab(session, tabId);
-
-  return {
-    session,
-    data: {
-      tab,
-    },
-    lines: [formatTabActionLine('Reloaded', tab)],
-  };
-}
-
-async function runDuplicateTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabId = readRequiredTabId(args[0], 'duplicate');
-  const session = await resolveSession(options);
-  const tab = await options.browserService.duplicateTab(session, tabId);
-
-  return {
-    session,
-    data: {
-      tab,
-    },
-    lines: [formatTabActionLine('Duplicated', tab)],
-  };
-}
-
-async function runMoveTabCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const { tabId, moveOptions } = parseMoveTabOptions(args);
-  const session = await resolveSession(options);
-  const tab = await options.browserService.moveTab(session, tabId, moveOptions);
-
-  return {
-    session,
-    data: {
-      tab,
-    },
-    lines: [formatTabActionLine('Moved', tab)],
-  };
-}
-
-async function runPinTabsCommand(
-  args: string[],
-  options: TabsCommandOptions,
-  pinned = true
-): Promise<CliCommandResult> {
-  const tabIds = parseRequiredTabIds(args, pinned ? 'pin' : 'unpin');
-  const session = await resolveSession(options);
-  const tabs = await options.browserService.pinTabs(session, tabIds, pinned);
-
-  return {
-    session,
-    data: {
-      tabs,
-    },
-    lines: [formatBulkTabActionLine(pinned ? 'Pinned' : 'Unpinned', tabs)],
-  };
-}
-
-async function runMuteTabsCommand(
-  args: string[],
-  options: TabsCommandOptions,
-  muted = true
-): Promise<CliCommandResult> {
-  const tabIds = parseRequiredTabIds(args, muted ? 'mute' : 'unmute');
-  const session = await resolveSession(options);
-  const tabs = await options.browserService.muteTabs(session, tabIds, muted);
-
-  return {
-    session,
-    data: {
-      tabs,
-    },
-    lines: [formatBulkTabActionLine(muted ? 'Muted' : 'Unmuted', tabs)],
-  };
-}
-
-async function runGroupTabsCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabIds = parseRequiredTabIds(args, 'group');
-  const session = await resolveSession(options);
-  const outcome = await options.browserService.groupTabs(session, tabIds);
-
-  return {
-    session,
-    data: outcome,
-    lines: [formatGroupedTabsLine(outcome.groupId, outcome.tabs)],
-  };
-}
-
-async function runUngroupTabsCommand(
-  args: string[],
-  options: TabsCommandOptions
-): Promise<CliCommandResult> {
-  const tabIds = parseRequiredTabIds(args, 'ungroup');
-  const session = await resolveSession(options);
-  const tabs = await options.browserService.ungroupTabs(session, tabIds);
-
-  return {
-    session,
-    data: {
-      tabs,
-    },
-    lines: [formatBulkTabActionLine('Ungrouped', tabs)],
-  };
-}
-
-async function resolveSession(options: TabsCommandOptions): Promise<CliSessionRecord> {
-  const result = await options.sessionStore.resolveSession(options.explicitSessionId);
-  return result.session;
-}
-
-function parseListTabsOptions(args: string[]): { windowId?: number; currentWindow?: boolean } {
-  const listOptions: { windowId?: number; currentWindow?: boolean } = {
-    currentWindow: true,
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--all') {
-      delete listOptions.currentWindow;
-      continue;
-    }
-
-    if (arg === '--window') {
-      listOptions.windowId = readRequiredNumericOption(args, index, '--window');
-      delete listOptions.currentWindow;
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--window=')) {
-      listOptions.windowId = parseInteger(arg.slice('--window='.length), '--window');
-      delete listOptions.currentWindow;
-      continue;
-    }
-
-    throw new Error(`Unknown option for tabs list: ${arg}`);
-  }
-
-  return listOptions;
-}
-
-function parseOpenTabOptions(args: string[]): CliOpenTabOptions {
-  let url: string | null = null;
-  const openOptions: Omit<CliOpenTabOptions, 'url'> = {};
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (!arg.startsWith('-') && url === null) {
-      url = arg;
-      continue;
-    }
-
-    if (arg === '--url') {
-      url = readRequiredOptionValue(args, index, '--url');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--url=')) {
-      url = arg.slice('--url='.length);
-      continue;
-    }
-
-    if (arg === '--window') {
-      openOptions.windowId = readRequiredNumericOption(args, index, '--window');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--window=')) {
-      openOptions.windowId = parseInteger(arg.slice('--window='.length), '--window');
-      continue;
-    }
-
-    if (arg === '--active' || arg.startsWith('--active=')) {
-      const { value, consumedNextArgument } = readBooleanFlag(args, index, '--active');
-      openOptions.active = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    if (arg === '--pinned' || arg.startsWith('--pinned=')) {
-      const { value, consumedNextArgument } = readBooleanFlag(args, index, '--pinned');
-      openOptions.pinned = value;
-      index += consumedNextArgument ? 1 : 0;
-      continue;
-    }
-
-    throw new Error(`Unknown option for tabs open: ${arg}`);
-  }
-
-  if (!url) {
-    throw new Error('Missing URL. Usage: chrome-controller tabs open <url>');
-  }
-
-  return {
-    ...openOptions,
-    url,
-  };
-}
-
-function parseMoveTabOptions(args: string[]): { tabId: number; moveOptions: CliMoveTabOptions } {
-  const [firstArg, ...rest] = args;
-  const tabId = readRequiredTabId(firstArg, 'move');
-  const moveOptions: CliMoveTabOptions = {};
-
-  for (let index = 0; index < rest.length; index += 1) {
-    const arg = rest[index];
-
-    if (arg === '--window') {
-      moveOptions.windowId = readRequiredNumericOption(rest, index, '--window');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--window=')) {
-      moveOptions.windowId = parseInteger(arg.slice('--window='.length), '--window');
-      continue;
-    }
-
-    if (arg === '--index') {
-      moveOptions.index = readRequiredNumericOption(rest, index, '--index');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--index=')) {
-      moveOptions.index = parseInteger(arg.slice('--index='.length), '--index');
-      continue;
-    }
-
-    throw new Error(`Unknown option for tabs move: ${arg}`);
-  }
-
-  return {
-    tabId,
-    moveOptions,
-  };
-}
-
-function parseCloseOtherTabsOptions(args: string[]): CliCloseOtherTabsOptions {
-  const closeOtherOptions: CliCloseOtherTabsOptions = {};
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === '--window') {
-      closeOtherOptions.windowId = readRequiredNumericOption(args, index, '--window');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--window=')) {
-      closeOtherOptions.windowId = parseInteger(arg.slice('--window='.length), '--window');
-      continue;
-    }
-
-    if (arg === '--keep') {
-      closeOtherOptions.keepTabId = readRequiredNumericOption(args, index, '--keep');
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--keep=')) {
-      closeOtherOptions.keepTabId = parseInteger(arg.slice('--keep='.length), '--keep');
-      continue;
-    }
-
-    throw new Error(`Unknown option for tabs close-others: ${arg}`);
-  }
-
-  return closeOtherOptions;
-}
-
-function parseRequiredTabIds(args: string[], commandName: string): number[] {
-  const tabIds = args.map((arg) => readRequiredTabId(arg, commandName));
-  if (tabIds.length === 0) {
-    throw new Error(`Missing tab id. Usage: chrome-controller tabs ${commandName} <tabId...>`);
-  }
-
-  return tabIds;
-}
-
-function readRequiredTabId(rawValue: string | undefined, commandName: string): number {
-  if (!rawValue) {
-    throw new Error(`Missing tab id. Usage: chrome-controller tabs ${commandName} <tabId>`);
-  }
-
-  const value = Number(rawValue);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`Invalid tab id: ${rawValue}`);
-  }
-
-  return value;
-}
-
-function readRequiredOptionValue(args: string[], index: number, flagName: string): string {
-  const value = args[index + 1];
-  if (!value) {
-    throw new Error(`Missing value for ${flagName}`);
-  }
-
-  return value;
-}
-
-function readRequiredNumericOption(args: string[], index: number, flagName: string): number {
-  return parseInteger(readRequiredOptionValue(args, index, flagName), flagName);
-}
-
-function readBooleanFlag(
-  args: string[],
-  index: number,
-  flagName: string
-): { value: boolean; consumedNextArgument: boolean } {
-  const arg = args[index];
-  if (arg.startsWith(`${flagName}=`)) {
-    return {
-      value: parseBoolean(arg.slice(flagName.length + 1), flagName),
-      consumedNextArgument: false,
-    };
-  }
-
-  const nextValue = args[index + 1];
-  if (nextValue === 'true' || nextValue === 'false') {
-    return {
-      value: parseBoolean(nextValue, flagName),
-      consumedNextArgument: true,
-    };
-  }
-
-  return {
-    value: true,
-    consumedNextArgument: false,
-  };
-}
-
-function parseBoolean(rawValue: string, flagName: string): boolean {
-  if (rawValue === 'true') {
-    return true;
-  }
-  if (rawValue === 'false') {
-    return false;
-  }
-
-  throw new Error(`Invalid boolean value for ${flagName}: ${rawValue}`);
-}
-
-function parseInteger(rawValue: string, flagName: string): number {
-  const value = Number(rawValue);
-  if (!Number.isInteger(value)) {
-    throw new Error(`Invalid integer value for ${flagName}: ${rawValue}`);
-  }
-
-  return value;
-}
-
-function createTabsHelpLines(): string[] {
-  return [
-    'Tabs commands',
-    '',
-    'Usage:',
-    '  chrome-controller tabs list [--window <id>] [--all]',
-    '  chrome-controller tabs open <url> [--window <id>] [--active] [--pinned]',
-    '  chrome-controller tabs target set <tabId>',
-    '  chrome-controller tabs target show',
-    '  chrome-controller tabs target clear',
-    '  chrome-controller tabs get <tabId>',
-    '  chrome-controller tabs activate <tabId>',
-    '  chrome-controller tabs close <tabId...>',
-    '  chrome-controller tabs close-others [--window <id>] [--keep <tabId>]',
-    '  chrome-controller tabs reload <tabId>',
-    '  chrome-controller tabs duplicate <tabId>',
-    '  chrome-controller tabs move <tabId> [--window <id>] [--index <n>]',
-    '  chrome-controller tabs pin <tabId...>',
-    '  chrome-controller tabs unpin <tabId...>',
-    '  chrome-controller tabs mute <tabId...>',
-    '  chrome-controller tabs unmute <tabId...>',
-    '  chrome-controller tabs group <tabId...>',
-    '  chrome-controller tabs ungroup <tabId...>',
-  ];
-}
-
-function createTargetTabHelpLines(): string[] {
-  return [
-    'Tabs target commands',
-    '',
-    'Usage:',
-    '  chrome-controller tabs target set <tabId>',
-    '  chrome-controller tabs target show',
-    '  chrome-controller tabs target clear',
-  ];
-}
-
-function createTabListLines(tabs: CliTabInfo[]): string[] {
-  if (tabs.length === 0) {
-    return ['No tabs found'];
-  }
-
-  const lines = ['Tabs'];
-  for (const tab of tabs) {
-    lines.push(
-      `${tab.active ? '*' : ' '} ${formatTabId(tab)}  window=${tab.windowId ?? 'unknown'}  ${tab.url ?? 'about:blank'}`
-    );
-  }
-
-  return lines;
-}
-
-function createTabDetailLines(tab: CliTabInfo): string[] {
-  return [
-    `Tab ${formatTabId(tab)}`,
-    `Window: ${tab.windowId ?? 'unknown'}`,
-    `Active: ${tab.active ? 'true' : 'false'}`,
-    `Pinned: ${tab.pinned ? 'true' : 'false'}`,
-    `Audible: ${tab.audible ? 'true' : 'false'}`,
-    `Muted: ${tab.muted ? 'true' : 'false'}`,
-    `Index: ${tab.index ?? 'unknown'}`,
-    `Status: ${tab.status ?? 'unknown'}`,
-    `Group: ${tab.groupId ?? 'none'}`,
-    `URL: ${tab.url ?? 'none'}`,
-    `Title: ${tab.title ?? 'none'}`,
-  ];
-}
-
-function formatTabId(tab: CliTabInfo): string {
-  return tab.id === null ? 'unknown' : String(tab.id);
-}
-
-function formatTabActionLine(action: string, tab: CliTabInfo): string {
-  return `${action} ${formatTabSummary(tab)}`;
-}
-
-function formatBulkTabActionLine(action: string, tabs: CliTabInfo[]): string {
-  if (tabs.length === 1) {
-    return formatTabActionLine(action, tabs[0]);
-  }
-
-  return `${action} ${tabs.length} tabs: ${tabs.map((tab) => formatTabId(tab)).join(', ')}`;
-}
-
-function formatGroupedTabsLine(groupId: number, tabs: CliTabInfo[]): string {
-  if (tabs.length === 1) {
-    return `${formatTabActionLine('Grouped', tabs[0])} into group ${groupId}`;
-  }
-
-  return `Grouped ${tabs.length} tabs into group ${groupId}: ${tabs
-    .map((tab) => formatTabId(tab))
-    .join(', ')}`;
-}
-
-function formatClosedTabsLine(tabIds: number[]): string {
-  if (tabIds.length === 1) {
-    return `Closed tab ${tabIds[0]}`;
-  }
-
-  return `Closed ${tabIds.length} tabs: ${tabIds.join(', ')}`;
-}
-
-function formatCloseOtherTabsLine(outcome: {
-  closedTabIds: number[];
-  keptTabIds: number[];
-}): string {
-  const closedLabel =
-    outcome.closedTabIds.length === 0
-      ? 'Closed no other tabs'
-      : outcome.closedTabIds.length === 1
-        ? `Closed 1 other tab: ${outcome.closedTabIds[0]}`
-        : `Closed ${outcome.closedTabIds.length} other tabs: ${outcome.closedTabIds.join(', ')}`;
-
-  if (outcome.keptTabIds.length === 0) {
-    return closedLabel;
-  }
-
-  return `${closedLabel}; kept ${outcome.keptTabIds.join(', ')}`;
-}
-
-function formatTabSummary(tab: CliTabInfo): string {
-  const parts = [`tab ${formatTabId(tab)}`];
-
-  if (tab.windowId !== null) {
-    parts.push(`window=${tab.windowId}`);
-  }
-
-  if (tab.title) {
-    parts.push(JSON.stringify(tab.title));
-  }
-
-  if (tab.url) {
-    parts.push(tab.url);
-  }
-
-  return parts.join(' ');
 }

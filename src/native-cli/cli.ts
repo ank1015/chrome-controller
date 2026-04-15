@@ -8,21 +8,17 @@ import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 
 import { runSessionCommand } from './commands/session.js';
-import { runDebuggerCommand } from './commands/debugger.js';
-import { runCookiesCommand } from './commands/cookies.js';
-import { runDownloadsCommand } from './commands/downloads.js';
-import { runStorageCommand } from './commands/storage.js';
+import { runSetupCommand } from './commands/setup.js';
+import { runObserveCommand } from './commands/observe.js';
+import { runStateCommand } from './commands/state.js';
 import { runTabsCommand } from './commands/tabs.js';
 import { runUploadCommand } from './commands/upload.js';
-import { runConsoleCommand } from './commands/console.js';
 import { runElementCommand } from './commands/element.js';
-import { runFindCommand } from './commands/find.js';
-import { runNetworkCommand } from './commands/network.js';
 import { runKeyboardCommand } from './commands/keyboard.js';
 import { runMouseCommand } from './commands/mouse.js';
 import { runOpenCommand } from './commands/open.js';
 import { runPageCommand } from './commands/page.js';
-import { runScreenshotCommand } from './commands/screenshot.js';
+import { runRawCommand } from './commands/raw.js';
 import { runWaitCommand } from './commands/wait.js';
 import { runWindowsCommand } from './commands/windows.js';
 import { SessionStore } from './session-store.js';
@@ -63,6 +59,8 @@ export async function runCli(
       browserService,
       sessionStore,
       env: options.env,
+      stdout,
+      stderr,
     });
 
     writeResult(stdout, parsedArgs.json, result);
@@ -82,6 +80,8 @@ async function dispatchCommand(
     explicitSessionId?: string;
     sessionStore: SessionStore;
     env?: NodeJS.ProcessEnv;
+    stdout: CliWritable;
+    stderr: CliWritable;
   }
 ): Promise<CliCommandResult> {
   switch (command) {
@@ -95,9 +95,32 @@ async function dispatchCommand(
         json: context.json,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
+      });
+    case 'setup':
+      return await runSetupCommand({
+        args,
+        json: context.json,
+        env: context.env,
+        stdout: context.stdout,
+        stderr: context.stderr,
       });
     case 'windows':
       return await runWindowsCommand({
+        args,
+        explicitSessionId: context.explicitSessionId,
+        sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
+      });
+    case 'observe':
+      return await runObserveCommand({
+        args,
+        explicitSessionId: context.explicitSessionId,
+        sessionStore: context.sessionStore,
+        browserService: context.browserService ?? new ChromeBrowserService(),
+      });
+    case 'state':
+      return await runStateCommand({
         args,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
@@ -110,36 +133,8 @@ async function dispatchCommand(
         sessionStore: context.sessionStore,
         browserService: context.browserService ?? new ChromeBrowserService(),
       });
-    case 'debugger':
-      return await runDebuggerCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
-    case 'storage':
-      return await runStorageCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
     case 'upload':
       return await runUploadCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
-    case 'cookies':
-      return await runCookiesCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
-    case 'console':
-      return await runConsoleCommand({
         args,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
@@ -153,21 +148,6 @@ async function dispatchCommand(
         browserService: context.browserService ?? new ChromeBrowserService(),
         env: context.env,
       });
-    case 'find':
-      return await runFindCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-        env: context.env,
-      });
-    case 'downloads':
-      return await runDownloadsCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
     case 'keyboard':
       return await runKeyboardCommand({
         args,
@@ -177,13 +157,6 @@ async function dispatchCommand(
       });
     case 'mouse':
       return await runMouseCommand({
-        args,
-        explicitSessionId: context.explicitSessionId,
-        sessionStore: context.sessionStore,
-        browserService: context.browserService ?? new ChromeBrowserService(),
-      });
-    case 'network':
-      return await runNetworkCommand({
         args,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
@@ -204,13 +177,12 @@ async function dispatchCommand(
         browserService: context.browserService ?? new ChromeBrowserService(),
         env: context.env,
       });
-    case 'screenshot':
-      return await runScreenshotCommand({
+    case 'raw':
+      return await runRawCommand({
         args,
         explicitSessionId: context.explicitSessionId,
         sessionStore: context.sessionStore,
         browserService: context.browserService ?? new ChromeBrowserService(),
-        env: context.env,
       });
     case 'wait':
       return await runWaitCommand({
@@ -362,24 +334,20 @@ function createHelpLines(): string[] {
     '  chrome-controller <command> [options]',
     '',
     'Commands:',
-    '  cookies   Inspect and modify browser cookies',
-    '  console   Read browser console output',
-    '  debugger  Control Chrome DevTools Protocol sessions',
-    '  downloads Inspect and manage browser downloads',
+    '  observe   Observe console, network, and download activity',
+    '  state     Read and modify page storage state and cookies',
     '  element   Interact with page elements using selectors or @refs',
-    '  find      Build an LLM-friendly page model for semantic lookup',
-    '  keyboard  Send keyboard input to the active tab',
-    '  mouse     Send mouse input to the active tab',
-    '  network   Capture and control browser network traffic',
+    '  keyboard  Send keyboard input to the active session tab',
+    '  mouse     Send mouse input to the active session tab',
     '  open      Safely open or reuse a matching tab and pin it to the session',
-    '  page      Navigate and inspect basic page metadata',
-    '  screenshot Capture page screenshots',
+    '  page      Navigate and inspect page state and content',
+    '  raw       Advanced escape hatch for raw browser APIs and CDP',
     '  session   Manage CLI sessions',
-    '  storage   Read and modify page storage state',
+    '  setup     Choose a Chrome profile and install the extension/native host',
     '  tabs      Inspect and manage browser tabs',
     '  upload    Upload files through file inputs',
     '  wait      Wait for page and browser conditions',
-    '  windows   Inspect and manage browser windows',
+    '  windows   Manage the active session window',
     '  help      Show this help',
     '',
     'Global options:',

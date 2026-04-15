@@ -7,7 +7,7 @@ import { createPageMarkdown } from '../page-markdown.js';
 import { createPageSnapshotRecord, writePageSnapshotCache } from '../page-snapshot.js';
 import { SessionStore } from '../session-store.js';
 
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import { resolveManagedCurrentTab } from './support.js';
 
 import type { BrowserService, CliCommandResult, CliRunOptions } from '../types.js';
 
@@ -22,10 +22,13 @@ interface FindCommandOptions {
 export async function runFindCommand(
   options: FindCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(options.args, 'find');
-  const parsed = parseFindArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseFindArgs(options.args);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab);
 
   const rawSnapshot = await captureStablePageSnapshot(options.browserService, session, tabId);
   const snapshotRecord = createPageSnapshotRecord({
@@ -100,7 +103,7 @@ function parseFindArgs(args: string[]): {
   }
 
   if (!query) {
-    throw new Error('Usage: chrome-controller find <query> [--limit <n>] [--tab <id>]');
+    throw new Error('Usage: chrome-controller page find <query> [--limit <n>]');
   }
 
   return {
@@ -116,4 +119,12 @@ function parseFindLimit(rawValue: string): number {
   }
 
   return value;
+}
+
+function requireTabId(tab: { id: number | null }): number {
+  if (typeof tab.id !== 'number') {
+    throw new Error('Could not resolve a tab id for find');
+  }
+
+  return tab.id;
 }

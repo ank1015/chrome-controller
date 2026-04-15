@@ -110,7 +110,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       method: 'listTabs',
       sessionId: session.id,
       payload: {
-        currentWindow: true,
+        windowId: 11,
       },
     });
 
@@ -353,27 +353,15 @@ describe('native CLI wait commands', () => {
     });
   });
 
-  it('accepts --tab for wait idle and validates the explicit tab', async () => {
-    const outcome = await runCliCommand(
-      ['wait', 'idle', '5', '--tab', '101', '--json'],
-      tempHome,
-      browserService,
-      now
-    );
+  it('waits idly without creating or resolving a browser session', async () => {
+    const outcome = await runCliCommand(['wait', 'idle', '5', '--json'], tempHome, browserService, now);
     const payload = JSON.parse(outcome.stdout);
 
     expect(outcome.exitCode).toBe(0);
     expect(payload.data).toEqual({
       ms: 5,
-      tabId: 101,
     });
-    expect(browserService.calls).toEqual([
-      {
-        method: 'getTab',
-        sessionId: 's1',
-        payload: 101,
-      },
-    ]);
+    expect(browserService.calls).toEqual([]);
   });
 
   it('waits for an async function condition with await-promise support', async () => {

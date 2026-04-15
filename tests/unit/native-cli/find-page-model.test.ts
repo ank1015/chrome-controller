@@ -18,8 +18,14 @@ vi.mock('@ank1015/llm-sdk', () => ({
 }));
 
 import {
+  buildFindPageSnapshotSystemPrompt,
+  buildFindPageTextSystemPrompt,
   buildFindPageModelSystemPrompt,
+  createFindPageSnapshotMarkdown,
+  createFindPageTextMarkdown,
   createFindPageModelMarkdown,
+  runFindPageSnapshotLlm,
+  runFindPageTextLlm,
   runFindPageModelLlm,
 } from '../../../src/native-cli/find-page-model.js';
 
@@ -158,6 +164,132 @@ describe('find page model helpers', () => {
     });
   });
 
+  it('builds focused markdown inputs for filtered snapshot and text retrieval', () => {
+    expect(
+      createFindPageSnapshotMarkdown({
+        snapshot: {
+          source: 'dom-interactive-v1',
+          snapshotId: 'snap-101',
+          capturedAt: '2026-04-07T10:00:00.000Z',
+          tabId: 101,
+          title: 'Inbox',
+          url: 'https://mail.google.com',
+          count: 2,
+          visibleCount: 2,
+          truncated: false,
+          elements: [
+            {
+              ref: '@e1',
+              role: 'button',
+              name: 'Compose',
+              tagName: 'button',
+              inputType: null,
+              selector: 'button',
+              alternativeSelectors: [],
+              placeholder: null,
+              disabled: false,
+              checked: null,
+            },
+            {
+              ref: '@e2',
+              role: 'link',
+              name: 'Sent',
+              tagName: 'a',
+              inputType: null,
+              selector: 'a[href="/sent"]',
+              alternativeSelectors: [],
+              placeholder: null,
+              disabled: false,
+              checked: null,
+            },
+          ],
+        },
+      })
+    ).toContain('@e1 [button] "Compose"');
+
+    expect(
+      createFindPageTextMarkdown({
+        pageText: {
+          title: 'Inbox',
+          url: 'https://mail.google.com',
+          markdown: '# Inbox\n\nYour account summary is ready.',
+        },
+      })
+    ).toBe(
+      [
+        '# Page text',
+        '',
+        'Title: Inbox',
+        'URL: https://mail.google.com',
+        '',
+        '## Visible text',
+        '# Inbox',
+        '',
+        'Your account summary is ready.',
+      ].join('\n')
+    );
+  });
+
+  it('uses specialized prompts for snapshot and text filtering', async () => {
+    llmMock.mockResolvedValueOnce({
+      mockText: '- @e1 [button] "Compose"',
+    });
+    llmMock.mockResolvedValueOnce({
+      mockText: '- Your account summary is ready.',
+    });
+
+    await expect(
+      runFindPageSnapshotLlm({
+        query: 'compose related',
+        limit: 5,
+        snapshotMarkdown: '# Interactive snapshot',
+      })
+    ).resolves.toBe('- @e1 [button] "Compose"');
+
+    await expect(
+      runFindPageTextLlm({
+        query: 'account summary',
+        limit: 5,
+        pageTextMarkdown: '# Page text',
+      })
+    ).resolves.toBe('- Your account summary is ready.');
+
+    expect(llmMock).toHaveBeenNthCalledWith(1, {
+      modelId: 'codex/gpt-5.4-mini',
+      reasoningEffort: 'low',
+      system: buildFindPageSnapshotSystemPrompt({
+        query: 'compose related',
+        limit: 5,
+        snapshotMarkdown: '# Interactive snapshot',
+      }),
+      messages: [
+        {
+          role: 'user',
+          id: 'user-message-1',
+          timestamp: 0,
+          content: [{ type: 'text', content: '# Interactive snapshot' }],
+        },
+      ],
+    });
+    expect(llmMock).toHaveBeenNthCalledWith(2, {
+      modelId: 'codex/gpt-5.4-mini',
+      reasoningEffort: 'low',
+      system: buildFindPageTextSystemPrompt({
+        query: 'account summary',
+        limit: 5,
+        pageTextMarkdown: '# Page text',
+      }),
+      messages: [
+        {
+          role: 'user',
+          id: 'user-message-1',
+          timestamp: 0,
+          content: [{ type: 'text', content: '# Page text' }],
+        },
+      ],
+    });
+  });
+
   it('falls back to a no-results string when the llm returns no text', async () => {
     llmMock.mockResolvedValue({
       mockText: '   ',
@@ -187,5 +319,27 @@ describe('find page model helpers', () => {
     expect(prompt).toContain('Return multiple ranked candidates when more than one plausible match exists.');
     expect(prompt).toContain('include weaker or noisier but still plausible candidates');
     expect(prompt).toContain('## Target: <target name>');
+  });
+
+  it('tells text filtering to preserve exact wording and snapshot filtering to preserve exact element lines', () => {
+    const snapshotPrompt = buildFindPageSnapshotSystemPrompt({
+      query: 'send related or compose related',
+      limit: 8,
+      snapshotMarkdown: '# Interactive snapshot',
+    });
+    const textPrompt = buildFindPageTextSystemPrompt({
+      query: 'latest inbox messages or unread mail summaries',
+      limit: 8,
+      pageTextMarkdown: '# Page text',
+    });
+
+    expect(snapshotPrompt).toContain('Preserve every returned element line exactly as it appears');
+    expect(snapshotPrompt).toContain('prioritize actionable controls alongside matching fields');
+    expect(snapshotPrompt).toContain('prefer controls that belong to that active workflow');
+    expect(snapshotPrompt).toContain('Return at most the requested number of element lines.');
+    expect(textPrompt).toContain('Preserve the exact wording from the page text.');
+    expect(textPrompt).toContain('Prefer exact heading lines or tight exact excerpts');
+    expect(textPrompt).toContain('It is okay to return slightly longer exact excerpts');
+    expect(textPrompt).toContain('Keep related details together');
   });
 });

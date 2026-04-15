@@ -18,6 +18,7 @@ function createFakeElement(
   } = {}
 ): any {
   const element = {
+    nodeType: 1,
     tagName: tagName.toUpperCase(),
     id: options.id ?? '',
     parentElement: options.parentElement ?? null,
@@ -250,17 +251,68 @@ describe('native CLI page snapshot helpers', () => {
   });
 
   it('prefers actionable anchor ancestors for link-like snapshot targets', () => {
-    const anchor = { kind: 'anchor' };
-    const textbox = { kind: 'textbox' };
+    const anchor = { kind: 'anchor', nodeType: 1 };
+    const textbox = { kind: 'textbox', nodeType: 1 };
     const wrapper = {
-      querySelector: (selector: string) =>
-        selector.includes('contenteditable') ? textbox : null,
+      nodeType: 1,
+      querySelectorAll: (selector: string) =>
+        selector.includes('contenteditable') ? [textbox] : [],
       closest: (selector: string) => (selector === 'a[href]' ? anchor : null),
     };
 
     expect(selectActionableSnapshotTarget(wrapper, 'link')).toBe(anchor);
     expect(selectActionableSnapshotTarget(wrapper, 'textbox')).toBe(textbox);
     expect(selectActionableSnapshotTarget(wrapper, 'button')).toBe(wrapper);
+  });
+
+  it('prefers a visible textbox descendant over hidden matches for snapshot targets', () => {
+    class SnapshotElement {
+      nodeType = 1;
+      parentElement: SnapshotElement | null = null;
+      children: SnapshotElement[] = [];
+      constructor(
+        readonly label: string,
+        readonly rect: { width: number; height: number }
+      ) {}
+
+      getBoundingClientRect() {
+        return {
+          top: 20,
+          left: 10,
+          right: 10 + this.rect.width,
+          bottom: 20 + this.rect.height,
+          width: this.rect.width,
+          height: this.rect.height,
+        };
+      }
+
+      getClientRects() {
+        return this.rect.width > 0 && this.rect.height > 0 ? [this.getBoundingClientRect()] : [];
+      }
+    }
+
+    const previousElement = (globalThis as Record<string, unknown>).Element;
+    const previousComputedStyle = (globalThis as Record<string, unknown>).getComputedStyle;
+    (globalThis as Record<string, unknown>).Element = SnapshotElement;
+    (globalThis as Record<string, unknown>).getComputedStyle = () => ({
+      display: 'block',
+      visibility: 'visible',
+    });
+
+    try {
+      const hiddenTextbox = new SnapshotElement('hidden', { width: 0, height: 0 });
+      const visibleTextbox = new SnapshotElement('visible', { width: 200, height: 32 });
+      const wrapper = {
+        matches: () => false,
+        querySelectorAll: () => [hiddenTextbox, visibleTextbox],
+        closest: () => null,
+      };
+
+      expect(selectActionableSnapshotTarget(wrapper, 'textbox')).toBe(visibleTextbox);
+    } finally {
+      (globalThis as Record<string, unknown>).Element = previousElement;
+      (globalThis as Record<string, unknown>).getComputedStyle = previousComputedStyle;
+    }
   });
 
   it('deduplicates snapshot records that collapse onto the same actionable selector', () => {
@@ -416,5 +468,357 @@ describe('native CLI page snapshot helpers', () => {
         truncated: false,
       })
     );
+  });
+
+  it('keeps proxy-backed textbox controls visible in snapshots when they live inside a visible container', () => {
+    class RuntimeElement {
+      nodeType = 1;
+      tagName: string;
+      parentElement: RuntimeElement | null;
+      children: RuntimeElement[] = [];
+      attributes = new Map<string, string>();
+      ownerDocument: any = null;
+      rect: {
+        top: number;
+        left: number;
+        right: number;
+        bottom: number;
+        width: number;
+        height: number;
+      };
+      isContentEditable = false;
+
+      constructor(
+        tagName: string,
+        rect: { top: number; left: number; width: number; height: number },
+        parentElement: RuntimeElement | null = null
+      ) {
+        this.tagName = tagName.toUpperCase();
+        this.parentElement = parentElement;
+        this.ownerDocument = parentElement?.ownerDocument ?? null;
+        this.rect = {
+          top: rect.top,
+          left: rect.left,
+          right: rect.left + rect.width,
+          bottom: rect.top + rect.height,
+          width: rect.width,
+          height: rect.height,
+        };
+        if (parentElement) {
+          parentElement.children.push(this);
+        }
+      }
+
+      setAttribute(name: string, value: string) {
+        this.attributes.set(name, value);
+      }
+
+      getAttribute(name: string) {
+        return this.attributes.get(name) ?? null;
+      }
+
+      hasAttribute(name: string) {
+        return this.attributes.has(name);
+      }
+
+      matches(selector: string) {
+        return selector === 'input[aria-label="Recipients"]';
+      }
+
+      querySelectorAll(selector: string) {
+        if (selector === 'input:not([type="hidden"]), textarea, [role~="textbox"], [role~="searchbox"], [contenteditable=""], [contenteditable="true"]') {
+          return [input];
+        }
+
+        return [];
+      }
+
+      closest() {
+        return null;
+      }
+
+      getBoundingClientRect() {
+        return this.rect;
+      }
+
+      getClientRects() {
+        return this.rect.width > 0 && this.rect.height > 0 ? [this.rect] : [];
+      }
+
+      get innerText() {
+        return this.getAttribute('aria-label') ?? '';
+      }
+
+      get textContent() {
+        return this.getAttribute('aria-label') ?? '';
+      }
+    }
+
+    class RuntimeInputElement extends RuntimeElement {
+      type = 'text';
+    }
+
+    const dialog = new RuntimeElement('div', {
+      top: 120,
+      left: 800,
+      width: 420,
+      height: 320,
+    });
+    const input = new RuntimeInputElement(
+      'input',
+      {
+        top: 140,
+        left: 820,
+        width: 0,
+        height: 0,
+      },
+      dialog
+    );
+    input.setAttribute('aria-label', 'Recipients');
+    input.setAttribute('type', 'text');
+
+    const rawResult = runInNewContext(buildPageSnapshotEvaluationCode(10), {
+      document: {
+        title: 'Inbox',
+        querySelectorAll: (selector: string) => {
+          if (selector === '*') {
+            return [input];
+          }
+          if (selector === 'input[aria-label="Recipients"]') {
+            return [input];
+          }
+          return [];
+        },
+      },
+      location: {
+        href: 'https://mail.google.com/mail/u/0/#inbox',
+      },
+      Node: {
+        ELEMENT_NODE: 1,
+      },
+      Element: RuntimeElement,
+      HTMLInputElement: RuntimeInputElement,
+      HTMLTextAreaElement: function HTMLTextAreaElement() {},
+      HTMLSelectElement: function HTMLSelectElement() {},
+      getComputedStyle: () => ({
+        display: 'block',
+        visibility: 'visible',
+        cursor: 'text',
+      }),
+      innerWidth: 1280,
+      innerHeight: 720,
+      CSS: {
+        escape: (value: string) => value,
+      },
+    });
+
+    const snapshot = createPageSnapshotRecord({
+      sessionId: 's1',
+      tabId: 101,
+      now: new Date('2026-04-14T00:00:00.000Z'),
+      raw: rawResult,
+    });
+
+    expect(snapshot.elements).toEqual([
+      expect.objectContaining({
+        ref: '@e1',
+        role: 'textbox',
+        name: 'Recipients',
+        selector: 'input[aria-label="Recipients"]',
+      }),
+    ]);
+    expect(snapshot.visibleCount).toBe(1);
+  });
+
+  it('captures interactive elements from a dominant same-origin iframe with frame-scoped selectors', () => {
+    const frameButton = {
+      nodeType: 1,
+      tagName: 'BUTTON',
+      id: '',
+      ownerDocument: null as any,
+      parentElement: null,
+      children: [] as any[],
+      isContentEditable: false,
+      getAttribute: (name: string) => {
+        if (name === 'aria-label') {
+          return 'Compose a new message';
+        }
+        return null;
+      },
+      hasAttribute: (name: string) => name === 'aria-label',
+      matches: () => false,
+      querySelectorAll: () => [],
+      closest: () => null,
+      getBoundingClientRect: () => ({
+        top: 60,
+        left: 760,
+        right: 800,
+        bottom: 100,
+        width: 40,
+        height: 40,
+      }),
+      getClientRects: () => [
+        {
+          top: 60,
+          left: 760,
+          right: 800,
+          bottom: 100,
+          width: 40,
+          height: 40,
+        },
+      ],
+      innerText: 'Compose a new message',
+      textContent: 'Compose a new message',
+    };
+
+    const frameDocument = {
+      title: 'Messaging | LinkedIn',
+      body: {
+        nodeType: 1,
+        tagName: 'BODY',
+        ownerDocument: null as any,
+        innerText: 'Compose a new message',
+        textContent: 'Compose a new message',
+        getBoundingClientRect: () => ({
+          top: 0,
+          left: 0,
+          right: 1200,
+          bottom: 784,
+          width: 1200,
+          height: 784,
+        }),
+        getClientRects: () => [
+          {
+            top: 0,
+            left: 0,
+            right: 1200,
+            bottom: 784,
+            width: 1200,
+            height: 784,
+          },
+        ],
+      },
+      documentElement: null as any,
+      querySelectorAll: (selector: string) => {
+        if (selector === '*') {
+          return [frameButton];
+        }
+        if (selector === 'button[aria-label="Compose a new message"]') {
+          return [frameButton];
+        }
+        if (selector === 'iframe, frame') {
+          return [];
+        }
+        return [];
+      },
+      defaultView: {
+        innerWidth: 1200,
+        innerHeight: 784,
+        getComputedStyle: () => ({
+          display: 'block',
+          visibility: 'visible',
+          cursor: 'default',
+        }),
+      },
+    };
+    frameButton.ownerDocument = frameDocument;
+    frameDocument.body.ownerDocument = frameDocument;
+    frameDocument.documentElement = frameDocument.body;
+
+    const frameElement = {
+      nodeType: 1,
+      tagName: 'IFRAME',
+      id: '',
+      ownerDocument: null as any,
+      parentElement: null,
+      children: [] as any[],
+      contentDocument: frameDocument,
+      contentWindow: { document: frameDocument },
+      isContentEditable: false,
+      getAttribute: (name: string) => {
+        if (name === 'title') {
+          return 'Messaging preload';
+        }
+        return null;
+      },
+      hasAttribute: (name: string) => name === 'title',
+      matches: () => false,
+      querySelectorAll: () => [],
+      closest: () => null,
+      getBoundingClientRect: () => ({
+        top: 0,
+        left: 0,
+        right: 1200,
+        bottom: 784,
+        width: 1200,
+        height: 784,
+      }),
+      getClientRects: () => [
+        {
+          top: 0,
+          left: 0,
+          right: 1200,
+          bottom: 784,
+          width: 1200,
+          height: 784,
+        },
+      ],
+      innerText: '',
+      textContent: '',
+    };
+
+    const topDocument = {
+      title: 'Messaging | LinkedIn',
+      querySelectorAll: (selector: string) => {
+        if (selector === 'iframe, frame' || selector === 'iframe[title="Messaging preload"]') {
+          return [frameElement];
+        }
+        if (selector === '*') {
+          return [];
+        }
+        return [];
+      },
+    };
+    frameElement.ownerDocument = topDocument;
+
+    const rawResult = runInNewContext(buildPageSnapshotEvaluationCode(10), {
+      document: topDocument,
+      location: {
+        href: 'https://www.linkedin.com/messaging/thread/abc/',
+      },
+      Node: {
+        ELEMENT_NODE: 1,
+      },
+      Element: function Element() {},
+      HTMLInputElement: function HTMLInputElement() {},
+      HTMLTextAreaElement: function HTMLTextAreaElement() {},
+      HTMLSelectElement: function HTMLSelectElement() {},
+      getComputedStyle: () => ({
+        display: 'block',
+        visibility: 'visible',
+        cursor: 'default',
+      }),
+      innerWidth: 1200,
+      innerHeight: 784,
+      CSS: {
+        escape: (value: string) => value,
+      },
+    });
+
+    const snapshot = createPageSnapshotRecord({
+      sessionId: 's1',
+      tabId: 101,
+      now: new Date('2026-04-15T00:00:00.000Z'),
+      raw: rawResult,
+    });
+
+    expect(snapshot.elements).toEqual([
+      expect.objectContaining({
+        ref: '@e1',
+        role: 'button',
+        name: 'Compose a new message',
+        selector: 'iframe[title="Messaging preload"] >>> button[aria-label="Compose a new message"]',
+      }),
+    ]);
   });
 });

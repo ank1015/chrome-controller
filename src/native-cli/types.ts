@@ -3,6 +3,7 @@ export interface CliSessionRecord {
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string;
+  windowId: number | null;
   targetTabId: number | null;
 }
 
@@ -139,6 +140,15 @@ export interface CliCreateWindowOptions {
   height?: number;
 }
 
+export interface CliUpdateWindowOptions {
+  focused?: boolean;
+  state?: string;
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+}
+
 export interface CliListTabsOptions {
   windowId?: number;
   currentWindow?: boolean;
@@ -162,12 +172,18 @@ export interface CliCloseOtherTabsOptions {
 }
 
 export interface BrowserService {
+  callBrowserMethod?(method: string, ...args: unknown[]): Promise<unknown>;
   listWindows(session: CliSessionRecord): Promise<CliWindowInfo[]>;
   getCurrentWindow(session: CliSessionRecord): Promise<CliWindowInfo>;
   getWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo>;
   createWindow(
     session: CliSessionRecord,
     options?: CliCreateWindowOptions
+  ): Promise<CliWindowInfo>;
+  updateWindow(
+    session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
   ): Promise<CliWindowInfo>;
   focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo>;
   closeWindow(session: CliSessionRecord, windowId: number): Promise<void>;

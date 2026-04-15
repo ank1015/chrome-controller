@@ -38,11 +38,18 @@ export async function runOpenCommand(
   }
 
   const parsed = parseOpenCommandArgs(options.args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const { tab: openedTab, createdNewTab, reusedExistingTab } = await openTabWithSettle(
     options.browserService,
     session,
-    parsed.openOptions
+    {
+      ...parsed.openOptions,
+      ...(session.windowId !== null ? { windowId: session.windowId } : {}),
+    }
   );
 
   if (typeof openedTab.id !== 'number') {
@@ -153,20 +160,6 @@ function parseOpenCommandArgs(args: string[]): ParsedOpenCommandArgs {
       continue;
     }
 
-    if (arg === '--window') {
-      openOptions.windowId = parsePositiveInteger(
-        readRequiredOptionValue(args, index, '--window'),
-        '--window'
-      );
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--window=')) {
-      openOptions.windowId = parsePositiveInteger(arg.slice('--window='.length), '--window');
-      continue;
-    }
-
     if (arg === '--active' || arg.startsWith('--active=')) {
       const { value, consumedNextArgument } = readBooleanFlag(args, index, '--active');
       openOptions.active = value;
@@ -233,7 +226,7 @@ function parseOpenCommandArgs(args: string[]): ParsedOpenCommandArgs {
 
   if (!url) {
     throw new Error(
-      'Usage: chrome-controller open <url> [--window <id>] [--active[=<bool>]] [--pinned[=<bool>]] [--ready] [--timeout-ms <n>] [--poll-ms <n>] [--quiet-ms <n>]'
+      'Usage: chrome-controller open <url> [--active[=<bool>]] [--pinned[=<bool>]] [--ready] [--timeout-ms <n>] [--poll-ms <n>] [--quiet-ms <n>]'
     );
   }
 
@@ -301,11 +294,12 @@ function createOpenHelpLines(): string[] {
     'Open command',
     '',
     'Usage:',
-    '  chrome-controller open <url> [--window <id>] [--active[=<bool>]] [--pinned[=<bool>]] [--ready] [--timeout-ms <n>] [--poll-ms <n>] [--quiet-ms <n>]',
+    '  chrome-controller open <url> [--active[=<bool>]] [--pinned[=<bool>]] [--ready] [--timeout-ms <n>] [--poll-ms <n>] [--quiet-ms <n>]',
     '',
     'Notes:',
-    '  Opens a tab or reuses an existing exact URL match, pins it as the session target tab, and can wait for stable readiness.',
+    "  Opens a tab or reuses an existing exact URL match inside the active session's managed window, pins it as the session current tab, and can wait for stable readiness.",
     '  This command defaults to --active=false so later commands can stay pinned to the chosen tab without stealing focus.',
+    '  When you use --ready, the wait defaults are --timeout-ms 30000 --poll-ms 250 --quiet-ms 500 unless you override them.',
     '  If --ready cannot confirm stability, the tab still opens and stays pinned. JSON output includes ready=false and readyError.',
   ];
 }

@@ -48,7 +48,11 @@ async function runListDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const parsed = parseDownloadsQueryOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const downloads = await options.browserService.listDownloads(session, parsed.filter);
   const limitedDownloads = downloads.slice(0, parsed.limit);
 
@@ -70,7 +74,11 @@ async function runWaitForDownloadCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const parsed = parseDownloadsWaitOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   const download = await options.browserService.waitForDownload(session, parsed.filter, {
     timeoutMs: parsed.timeoutMs,
     pollIntervalMs: parsed.pollIntervalMs,
@@ -92,7 +100,11 @@ async function runCancelDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const downloadIds = parseDownloadIds(args, 'cancel');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   await options.browserService.cancelDownloads(session, downloadIds);
 
   return {
@@ -110,7 +122,11 @@ async function runEraseDownloadsCommand(
   options: DownloadsCommandOptions
 ): Promise<CliCommandResult> {
   const downloadIds = parseDownloadIds(args, 'erase');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
+  const session = await resolveSession(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
   await options.browserService.eraseDownloads(session, downloadIds);
 
   return {
@@ -265,7 +281,7 @@ function parseDownloadsWaitOptions(args: string[]): {
 function parseDownloadIds(args: string[], commandName: string): number[] {
   if (args.length === 0) {
     throw new Error(
-      `Usage: chrome-controller downloads ${commandName} <downloadId...>`
+      `Usage: chrome-controller observe downloads ${commandName} <downloadId...>`
     );
   }
 
@@ -290,9 +306,9 @@ function createDownloadsHelpLines(): string[] {
     'Downloads commands',
     '',
     'Usage:',
-    '  chrome-controller downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]',
-    '  chrome-controller downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]',
-    '  chrome-controller downloads cancel <downloadId...>',
-    '  chrome-controller downloads erase <downloadId...>',
+    '  chrome-controller observe downloads list [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--limit <n>]',
+    '  chrome-controller observe downloads wait [--id <id>] [--state <state>] [--filename-includes <text>] [--url-includes <text>] [--mime <type>] [--timeout-ms <n>] [--poll-ms <n>] [--allow-incomplete]',
+    '  chrome-controller observe downloads cancel <downloadId...>',
+    '  chrome-controller observe downloads erase <downloadId...>',
   ];
 }

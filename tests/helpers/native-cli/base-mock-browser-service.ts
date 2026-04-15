@@ -6,6 +6,7 @@ import type {
   CliDebuggerEvent,
   CliDownloadInfo,
   CliDownloadsFilter,
+  CliUpdateWindowOptions,
   CliListTabsOptions,
   CliMoveTabOptions,
   CliOpenTabOptions,
@@ -18,32 +19,118 @@ import type {
 
 export abstract class BaseMockBrowserService implements BrowserService {
   readonly calls: Array<{ method: string; sessionId: string; payload?: unknown }> = [];
+  private readonly windows = new Map<number, CliWindowInfo>();
+  private nextWindowId = 11;
 
-  async listWindows(_session: CliSessionRecord): Promise<CliWindowInfo[]> {
-    throw this.unsupported('listWindows');
+  async listWindows(session: CliSessionRecord): Promise<CliWindowInfo[]> {
+    this.calls.push({
+      method: 'listWindows',
+      sessionId: session.id,
+    });
+
+    return [...this.windows.values()].map((window) => cloneWindow(window));
   }
 
-  async getCurrentWindow(_session: CliSessionRecord): Promise<CliWindowInfo> {
-    throw this.unsupported('getCurrentWindow');
+  async getCurrentWindow(session: CliSessionRecord): Promise<CliWindowInfo> {
+    this.calls.push({
+      method: 'getCurrentWindow',
+      sessionId: session.id,
+    });
+
+    const window = [...this.windows.values()].find((candidate) => candidate.focused)
+      ?? [...this.windows.values()][0];
+    if (!window) {
+      throw this.unsupported('getCurrentWindow');
+    }
+
+    return cloneWindow(window);
   }
 
-  async getWindow(_session: CliSessionRecord, _windowId: number): Promise<CliWindowInfo> {
-    throw this.unsupported('getWindow');
+  async getWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
+    this.calls.push({
+      method: 'getWindow',
+      sessionId: session.id,
+      payload: windowId,
+    });
+
+    const window = this.windows.get(windowId);
+    if (!window) {
+      throw new Error(`Missing window ${windowId}`);
+    }
+
+    return cloneWindow(window);
   }
 
   async createWindow(
-    _session: CliSessionRecord,
-    _options?: CliCreateWindowOptions
+    session: CliSessionRecord,
+    options: CliCreateWindowOptions = {}
   ): Promise<CliWindowInfo> {
-    throw this.unsupported('createWindow');
+    this.calls.push({
+      method: 'createWindow',
+      sessionId: session.id,
+      payload: options,
+    });
+
+    const id = this.nextWindowId++;
+    const window: CliWindowInfo = {
+      id,
+      focused: options.focused ?? false,
+      incognito: options.incognito ?? false,
+      state: options.state ?? 'normal',
+      type: options.type ?? 'normal',
+      tabCount: 0,
+      tabs: [],
+      activeTab: null,
+      bounds: {
+        left: options.left ?? null,
+        top: options.top ?? null,
+        width: options.width ?? null,
+        height: options.height ?? null,
+      },
+    };
+    this.windows.set(id, window);
+    return cloneWindow(window);
   }
 
-  async focusWindow(_session: CliSessionRecord, _windowId: number): Promise<CliWindowInfo> {
-    throw this.unsupported('focusWindow');
+  async updateWindow(
+    session: CliSessionRecord,
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): Promise<CliWindowInfo> {
+    this.calls.push({
+      method: 'updateWindow',
+      sessionId: session.id,
+      payload: {
+        windowId,
+        options,
+      },
+    });
+
+    return this.applyWindowUpdate(windowId, options);
   }
 
-  async closeWindow(_session: CliSessionRecord, _windowId: number): Promise<void> {
-    throw this.unsupported('closeWindow');
+  async focusWindow(session: CliSessionRecord, windowId: number): Promise<CliWindowInfo> {
+    this.calls.push({
+      method: 'focusWindow',
+      sessionId: session.id,
+      payload: windowId,
+    });
+
+    return this.applyWindowUpdate(windowId, {
+      focused: true,
+    });
+  }
+
+  async closeWindow(session: CliSessionRecord, windowId: number): Promise<void> {
+    this.calls.push({
+      method: 'closeWindow',
+      sessionId: session.id,
+      payload: windowId,
+    });
+
+    if (!this.windows.delete(windowId)) {
+      throw new Error(`Missing window ${windowId}`);
+    }
   }
 
   async listTabs(
@@ -324,4 +411,53 @@ export abstract class BaseMockBrowserService implements BrowserService {
   protected unsupported(method: string): Error {
     return new Error(`${method} is not used in this test`);
   }
+
+  private applyWindowUpdate(
+    windowId: number,
+    options: CliUpdateWindowOptions
+  ): CliWindowInfo {
+    const window = this.windows.get(windowId);
+    if (!window) {
+      throw new Error(`Missing window ${windowId}`);
+    }
+
+    if (options.focused === true) {
+      for (const candidate of this.windows.values()) {
+        candidate.focused = candidate.id === windowId;
+      }
+    } else if (options.focused === false) {
+      window.focused = false;
+    }
+
+    if (typeof options.state === 'string') {
+      window.state = options.state;
+    }
+
+    if (typeof options.left === 'number') {
+      window.bounds.left = options.left;
+    }
+
+    if (typeof options.top === 'number') {
+      window.bounds.top = options.top;
+    }
+
+    if (typeof options.width === 'number') {
+      window.bounds.width = options.width;
+    }
+
+    if (typeof options.height === 'number') {
+      window.bounds.height = options.height;
+    }
+
+    return cloneWindow(window);
+  }
+}
+
+function cloneWindow(window: CliWindowInfo): CliWindowInfo {
+  return {
+    ...window,
+    tabs: window.tabs.map((tab) => ({ ...tab })),
+    activeTab: window.activeTab ? { ...window.activeTab } : null,
+    bounds: { ...window.bounds },
+  };
 }

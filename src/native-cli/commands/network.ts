@@ -5,7 +5,7 @@ import { SessionStore } from '../session-store.js';
 
 import { buildHar, findNetworkRequest, summarizeNetwork, summarizeNetworkRequests } from '../network-utils.js';
 
-import { parseOptionalTabFlag, parsePositiveInteger, resolveSession, resolveTabId } from './support.js';
+import { parsePositiveInteger, resolveManagedCurrentTab, resolveSession } from './support.js';
 
 import type { BrowserService, CliCommandResult, CliDebuggerEvent } from '../types.js';
 
@@ -61,10 +61,8 @@ async function runStartNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network start');
-  const parsed = parseStartNetworkOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseStartNetworkOptions(rawArgs);
+  const { session, tabId } = await resolveNetworkTab(options);
   const attachResult = await ensureNetworkMonitoring(
     options.browserService,
     session,
@@ -89,13 +87,11 @@ async function runStopNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network stop');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for network stop: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for network stop: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
 
   try {
     await options.browserService.sendDebuggerCommand(session, tabId, 'Network.disable');
@@ -128,10 +124,8 @@ async function runListNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network list');
-  const parsed = parseNetworkListOptions(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const parsed = parseNetworkListOptions(rawArgs);
+  const { session, tabId } = await resolveNetworkTab(options);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const requests = filterNetworkRequests(summarizeNetworkRequests(events), parsed);
   const limitedRequests = requests.slice(0, parsed.limit);
@@ -153,17 +147,15 @@ async function runGetNetworkRequestCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network get');
-  const [requestId, ...rest] = args;
+  const [requestId, ...rest] = rawArgs;
   if (!requestId) {
-    throw new Error('Usage: chrome-controller network get <requestId> [--tab <id>]');
+    throw new Error('Usage: chrome-controller observe network get <requestId>');
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for network get: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const result = findNetworkRequest(events, requestId);
 
@@ -186,13 +178,11 @@ async function runSummaryNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network summary');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for network summary: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for network summary: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const requests = summarizeNetworkRequests(events);
   const summary = summarizeNetwork(events, requests);
@@ -211,13 +201,11 @@ async function runClearNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network clear');
-  if (args.length > 0) {
-    throw new Error(`Unknown option for network clear: ${args[0]}`);
+  if (rawArgs.length > 0) {
+    throw new Error(`Unknown option for network clear: ${rawArgs[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
 
   try {
     const cleared = await options.browserService.getDebuggerEvents(session, tabId, {
@@ -252,17 +240,15 @@ async function runExportHarCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network export-har');
-  const [filePath, ...rest] = args;
+  const [filePath, ...rest] = rawArgs;
   if (!filePath) {
-    throw new Error('Usage: chrome-controller network export-har <path> [--tab <id>]');
+    throw new Error('Usage: chrome-controller observe network export-har <path>');
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for network export-har: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   const events = await readNetworkEvents(options.browserService, session, tabId);
   const har = buildHar(events);
   const absolutePath = resolve(filePath);
@@ -285,25 +271,25 @@ async function runBlockNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network block');
-  if (args.length === 0) {
-    throw new Error('Usage: chrome-controller network block <pattern...> [--tab <id>]');
+  if (rawArgs.length === 0) {
+    throw new Error('Usage: chrome-controller observe network block <pattern...>');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(session, tabId, 'Network.setBlockedURLs', {
-    urls: args,
+    urls: rawArgs,
   });
 
   return {
     session,
     data: {
       tabId,
-      patterns: args,
+      patterns: rawArgs,
     },
-    lines: [`Blocked ${args.length} network pattern${args.length === 1 ? '' : 's'} on tab ${tabId}`],
+    lines: [
+      `Blocked ${rawArgs.length} network pattern${rawArgs.length === 1 ? '' : 's'} on tab ${tabId}`,
+    ],
   };
 }
 
@@ -311,13 +297,11 @@ async function runUnblockNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network unblock');
-  if (args.length > 0) {
+  if (rawArgs.length > 0) {
     throw new Error('network unblock does not take patterns; it clears all blocked URLs');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(session, tabId, 'Network.setBlockedURLs', {
     urls: [],
@@ -337,14 +321,12 @@ async function runOfflineNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network offline');
-  const [state, ...rest] = args;
+  const [state, ...rest] = rawArgs;
   if (!state || rest.length > 0 || !['on', 'off'].includes(state)) {
-    throw new Error('Usage: chrome-controller network offline <on|off> [--tab <id>]');
+    throw new Error('Usage: chrome-controller observe network offline <on|off>');
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(
     session,
@@ -379,15 +361,15 @@ async function runThrottleNetworkCommand(
   rawArgs: string[],
   options: NetworkCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'network throttle');
-  const [preset, ...rest] = args;
+  const [preset, ...rest] = rawArgs;
   if (!preset || rest.length > 0) {
-    throw new Error('Usage: chrome-controller network throttle <slow-3g|fast-3g|slow-4g|off> [--tab <id>]');
+    throw new Error(
+      'Usage: chrome-controller observe network throttle <slow-3g|fast-3g|slow-4g|off>'
+    );
   }
 
   const config = getThrottlePreset(preset);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tabId } = await resolveNetworkTab(options);
   await ensureNetworkMonitoring(options.browserService, session, tabId, {});
   await options.browserService.sendDebuggerCommand(
     session,
@@ -427,6 +409,25 @@ async function ensureNetworkMonitoring(
   }
 
   return attachResult;
+}
+
+async function resolveNetworkTab(
+  options: NetworkCommandOptions
+): Promise<{ session: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['session']; tabId: number }> {
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve the active session tab for session ${session.id}`);
+  }
+
+  return {
+    session,
+    tabId: tab.id,
+  };
 }
 
 async function readNetworkEvents(
@@ -604,18 +605,21 @@ function createNetworkHelpLines(): string[] {
   return [
     'Network commands',
     '',
+    "All network commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab network commands operate on.',
+    '',
     'Usage:',
-    '  chrome-controller network start [--no-clear] [--disable-cache] [--tab <id>]',
-    '  chrome-controller network stop [--tab <id>]',
-    '  chrome-controller network list [--limit <n>] [--url-includes <text>] [--status <code>] [--failed] [--tab <id>]',
-    '  chrome-controller network get <requestId> [--tab <id>]',
-    '  chrome-controller network summary [--tab <id>]',
-    '  chrome-controller network clear [--tab <id>]',
-    '  chrome-controller network export-har <path> [--tab <id>]',
-    '  chrome-controller network block <pattern...> [--tab <id>]',
-    '  chrome-controller network unblock [--tab <id>]',
-    '  chrome-controller network offline <on|off> [--tab <id>]',
-    '  chrome-controller network throttle <slow-3g|fast-3g|slow-4g|off> [--tab <id>]',
+    '  chrome-controller observe network start [--no-clear] [--disable-cache]',
+    '  chrome-controller observe network stop',
+    '  chrome-controller observe network list [--limit <n>] [--url-includes <text>] [--status <code>] [--failed]',
+    '  chrome-controller observe network get <requestId>',
+    '  chrome-controller observe network summary',
+    '  chrome-controller observe network clear',
+    '  chrome-controller observe network export-har <path>',
+    '  chrome-controller observe network block <pattern...>',
+    '  chrome-controller observe network unblock',
+    '  chrome-controller observe network offline <on|off>',
+    '  chrome-controller observe network throttle <slow-3g|fast-3g|slow-4g|off>',
     '',
     'Notes:',
     '  Call network start before listing, summarizing, or exporting captured requests.',

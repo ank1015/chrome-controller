@@ -6,7 +6,7 @@ import {
   sleep,
   withAttachedDebugger,
 } from '../interaction-support.js';
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import { resolveManagedCurrentTab } from './support.js';
 
 import type { BrowserService, CliCommandResult, CliSessionRecord } from '../types.js';
 
@@ -49,13 +49,12 @@ export async function runMouseCommand(
 }
 
 async function runMouseMoveCommand(
-  rawArgs: string[],
+  args: string[],
   options: MouseCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'mouse move');
   const [rawX, rawY, ...rest] = args;
   if (!rawX || !rawY) {
-    throw new Error('Usage: chrome-controller mouse move <x> <y> [--tab <id>]');
+    throw new Error('Usage: chrome-controller mouse move <x> <y>');
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for mouse move: ${rest[0]}`);
@@ -63,8 +62,12 @@ async function runMouseMoveCommand(
 
   const x = parseRequiredFloat(rawX, 'x');
   const y = parseRequiredFloat(rawY, 'y');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'move');
   await options.browserService.activateTab(session, tabId);
 
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -88,16 +91,15 @@ async function runMouseMoveCommand(
 }
 
 async function runMouseClickCommand(
-  rawArgs: string[],
+  args: string[],
   options: MouseCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'mouse click');
   const parsedButton = parseButtonFlag(args);
   const parsedCount = parseOptionalIntegerFlag(parsedButton.args, '--count');
   const [rawX, rawY, ...rest] = parsedCount.rest;
   if (!rawX || !rawY) {
     throw new Error(
-      'Usage: chrome-controller mouse click <x> <y> [--button <left|middle|right>] [--count <n>] [--tab <id>]'
+      'Usage: chrome-controller mouse click <x> <y> [--button <left|middle|right>] [--count <n>]'
     );
   }
   if (rest.length > 0) {
@@ -108,8 +110,12 @@ async function runMouseClickCommand(
   const y = parseRequiredFloat(rawY, 'y');
   const button = parsedButton.button;
   const count = parsedCount.value ?? 1;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'click');
   await options.browserService.activateTab(session, tabId);
 
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -131,15 +137,14 @@ async function runMouseClickCommand(
 
 async function runMouseButtonCommand(
   action: 'down' | 'up',
-  rawArgs: string[],
+  args: string[],
   options: MouseCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `mouse ${action}`);
   const parsedButton = parseButtonFlag(args);
   const [rawX, rawY, ...rest] = parsedButton.args;
   if (!rawX || !rawY) {
     throw new Error(
-      `Usage: chrome-controller mouse ${action} <x> <y> [--button <left|middle|right>] [--tab <id>]`
+      `Usage: chrome-controller mouse ${action} <x> <y> [--button <left|middle|right>]`
     );
   }
   if (rest.length > 0) {
@@ -149,8 +154,12 @@ async function runMouseButtonCommand(
   const x = parseRequiredFloat(rawX, 'x');
   const y = parseRequiredFloat(rawY, 'y');
   const button = parsedButton.button;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, action);
   await options.browserService.activateTab(session, tabId);
 
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -177,16 +186,15 @@ async function runMouseButtonCommand(
 }
 
 async function runMouseWheelCommand(
-  rawArgs: string[],
+  args: string[],
   options: MouseCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'mouse wheel');
   const parsedX = parseNamedFloatFlag(args, '--x');
   const parsedY = parseNamedFloatFlag(parsedX.args, '--y');
   const [rawDeltaX, rawDeltaY, ...rest] = parsedY.args;
   if (!rawDeltaX || !rawDeltaY) {
     throw new Error(
-      'Usage: chrome-controller mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>] [--tab <id>]'
+      'Usage: chrome-controller mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>]'
     );
   }
   if (rest.length > 0) {
@@ -197,8 +205,12 @@ async function runMouseWheelCommand(
   const deltaY = parseRequiredFloat(rawDeltaY, 'deltaY');
   const x = parsedX.value ?? 0;
   const y = parsedY.value ?? 0;
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'wheel');
   await options.browserService.activateTab(session, tabId);
 
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -226,15 +238,14 @@ async function runMouseWheelCommand(
 }
 
 async function runMouseDragCommand(
-  rawArgs: string[],
+  args: string[],
   options: MouseCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'mouse drag');
   const parsedSteps = parseOptionalIntegerFlag(args, '--steps');
   const [rawFromX, rawFromY, rawToX, rawToY, ...rest] = parsedSteps.rest;
   if (!rawFromX || !rawFromY || !rawToX || !rawToY) {
     throw new Error(
-      'Usage: chrome-controller mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>] [--tab <id>]'
+      'Usage: chrome-controller mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>]'
     );
   }
   if (rest.length > 0) {
@@ -246,8 +257,12 @@ async function runMouseDragCommand(
   const toX = parseRequiredFloat(rawToX, 'toX');
   const toY = parseRequiredFloat(rawToY, 'toY');
   const steps = Math.max(1, parsedSteps.value ?? 10);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'drag');
   await options.browserService.activateTab(session, tabId);
 
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -432,17 +447,31 @@ function getMouseButtonsMask(button: MouseButton): number {
   return 4;
 }
 
+function requireTabId(
+  tab: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['tab'],
+  commandName: string
+): number {
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve tab id for mouse ${commandName}`);
+  }
+
+  return tab.id;
+}
+
 function createMouseHelpLines(): string[] {
   return [
     'Mouse commands',
     '',
+    "All mouse commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab mouse commands operate on.',
+    '',
     'Usage:',
-    '  chrome-controller mouse move <x> <y> [--tab <id>]',
-    '  chrome-controller mouse click <x> <y> [--button <left|middle|right>] [--count <n>] [--tab <id>]',
-    '  chrome-controller mouse down <x> <y> [--button <left|middle|right>] [--tab <id>]',
-    '  chrome-controller mouse up <x> <y> [--button <left|middle|right>] [--tab <id>]',
-    '  chrome-controller mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>] [--tab <id>]',
-    '  chrome-controller mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>] [--tab <id>]',
+    '  chrome-controller mouse move <x> <y>',
+    '  chrome-controller mouse click <x> <y> [--button <left|middle|right>] [--count <n>]',
+    '  chrome-controller mouse down <x> <y> [--button <left|middle|right>]',
+    '  chrome-controller mouse up <x> <y> [--button <left|middle|right>]',
+    '  chrome-controller mouse wheel <deltaX> <deltaY> [--x <x>] [--y <y>]',
+    '  chrome-controller mouse drag <fromX> <fromY> <toX> <toY> [--steps <n>]',
     '',
     'Notes:',
     '  Use element box to get live coordinates for a selector or @ref when needed.',

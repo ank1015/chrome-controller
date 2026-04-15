@@ -37,7 +37,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
       method: 'listTabs',
       sessionId: session.id,
       payload: {
-        currentWindow: true,
+        windowId: 11,
       },
     });
 
@@ -160,10 +160,17 @@ describe('native CLI keyboard commands', () => {
     });
     expect(browserService.calls).toEqual([
       {
+        method: 'createWindow',
+        sessionId: 's1',
+        payload: {
+          focused: false,
+        },
+      },
+      {
         method: 'listTabs',
         sessionId: 's1',
         payload: {
-          currentWindow: true,
+          windowId: 11,
         },
       },
       {

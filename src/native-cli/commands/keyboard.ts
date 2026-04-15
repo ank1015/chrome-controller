@@ -1,7 +1,7 @@
 import { SessionStore } from '../session-store.js';
 
 import { withAttachedDebugger, sleep } from '../interaction-support.js';
-import { parseOptionalTabFlag, resolveSession, resolveTabId } from './support.js';
+import { resolveManagedCurrentTab } from './support.js';
 
 import type { BrowserService, CliCommandResult, CliSessionRecord } from '../types.js';
 
@@ -68,40 +68,47 @@ export async function runKeyboardCommand(
 }
 
 async function runKeyboardPressCommand(
-  rawArgs: string[],
+  args: string[],
   options: KeyboardCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'keyboard press');
   const parsed = parseKeyAndCount(args, 'keyboard press');
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'press');
 
-  await options.browserService.activateTab(session, tabId);
-  await withAttachedDebugger(options.browserService, session, tabId, async () => {
-    for (let index = 0; index < parsed.count; index += 1) {
-      await sendKeyPress(options.browserService, session, tabId, parsed.key);
-    }
-  });
+  const outcome = await pressKeyOnTab(
+    options.browserService,
+    session,
+    tabId,
+    parsed.key.key,
+    parsed.count
+  );
 
   return {
     session,
     data: {
       tabId,
-      key: parsed.key.key,
-      count: parsed.count,
+      key: outcome.key,
+      count: outcome.count,
     },
-    lines: [`Pressed ${parsed.key.key}${parsed.count === 1 ? '' : ` x${parsed.count}`}`],
+    lines: [`Pressed ${outcome.key}${outcome.count === 1 ? '' : ` x${outcome.count}`}`],
   };
 }
 
 async function runKeyboardTypeCommand(
-  rawArgs: string[],
+  args: string[],
   options: KeyboardCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, 'keyboard type');
   const parsed = parseKeyboardTypeArgs(args);
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, 'type');
 
   await options.browserService.activateTab(session, tabId);
   await withAttachedDebugger(options.browserService, session, tabId, async () => {
@@ -128,20 +135,23 @@ async function runKeyboardTypeCommand(
 
 async function runKeyboardDownUpCommand(
   action: 'down' | 'up',
-  rawArgs: string[],
+  args: string[],
   options: KeyboardCommandOptions
 ): Promise<CliCommandResult> {
-  const { args, tabId: explicitTabId } = parseOptionalTabFlag(rawArgs, `keyboard ${action}`);
   const [keyName, ...rest] = args;
   if (!keyName) {
-    throw new Error(`Usage: chrome-controller keyboard ${action} <key> [--tab <id>]`);
+    throw new Error(`Usage: chrome-controller keyboard ${action} <key>`);
   }
   if (rest.length > 0) {
     throw new Error(`Unknown option for keyboard ${action}: ${rest[0]}`);
   }
 
-  const session = await resolveSession(options.sessionStore, options.explicitSessionId);
-  const tabId = await resolveTabId(options.browserService, session, explicitTabId);
+  const { session, tab } = await resolveManagedCurrentTab(
+    options.sessionStore,
+    options.browserService,
+    options.explicitSessionId
+  );
+  const tabId = requireTabId(tab, action);
   const key = normalizeKeyDefinition(keyName);
 
   await options.browserService.activateTab(session, tabId);
@@ -176,7 +186,7 @@ function parseKeyAndCount(
 } {
   const [keyName, ...rest] = args;
   if (!keyName) {
-    throw new Error(`Usage: chrome-controller ${commandName} <key> [--count <n>] [--tab <id>]`);
+    throw new Error(`Usage: chrome-controller ${commandName} <key> [--count <n>]`);
   }
 
   let count = 1;
@@ -233,7 +243,7 @@ function parseKeyboardTypeArgs(args: string[]): {
 
   const text = textParts.join(' ');
   if (!text) {
-    throw new Error('Usage: chrome-controller keyboard type <text> [--delay-ms <n>] [--tab <id>]');
+    throw new Error('Usage: chrome-controller keyboard type <text> [--delay-ms <n>]');
   }
 
   return {
@@ -278,6 +288,29 @@ async function sendKeyPress(
     windowsVirtualKeyCode: key.keyCode,
     nativeVirtualKeyCode: key.keyCode,
   });
+}
+
+export async function pressKeyOnTab(
+  browserService: BrowserService,
+  session: CliSessionRecord,
+  tabId: number,
+  rawKeyName: string,
+  count = 1
+): Promise<{ key: string; count: number }> {
+  const key = normalizeKeyDefinition(rawKeyName);
+  const safeCount = Math.max(1, count);
+
+  await browserService.activateTab(session, tabId);
+  await withAttachedDebugger(browserService, session, tabId, async () => {
+    for (let index = 0; index < safeCount; index += 1) {
+      await sendKeyPress(browserService, session, tabId, key);
+    }
+  });
+
+  return {
+    key: key.key,
+    count: safeCount,
+  };
 }
 
 function normalizeKeyDefinition(rawValue: string): KeyDefinition {
@@ -329,14 +362,28 @@ function parseNonNegativeInteger(value: string, name: string): number {
   return parsed;
 }
 
+function requireTabId(
+  tab: Awaited<ReturnType<typeof resolveManagedCurrentTab>>['tab'],
+  commandName: string
+): number {
+  if (typeof tab.id !== 'number') {
+    throw new Error(`Could not resolve tab id for keyboard ${commandName}`);
+  }
+
+  return tab.id;
+}
+
 function createKeyboardHelpLines(): string[] {
   return [
     'Keyboard commands',
     '',
+    "All keyboard commands act on the active session's current tab.",
+    'Use `tabs use <tabId>` to switch which tab keyboard commands operate on.',
+    '',
     'Usage:',
-    '  chrome-controller keyboard press <key> [--count <n>] [--tab <id>]',
-    '  chrome-controller keyboard type <text> [--delay-ms <n>] [--tab <id>]',
-    '  chrome-controller keyboard down <key> [--tab <id>]',
-    '  chrome-controller keyboard up <key> [--tab <id>]',
+    '  chrome-controller keyboard press <key> [--count <n>]',
+    '  chrome-controller keyboard type <text> [--delay-ms <n>]',
+    '  chrome-controller keyboard down <key>',
+    '  chrome-controller keyboard up <key>',
   ];
 }

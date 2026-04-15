@@ -4,6 +4,15 @@ Chrome RPC bridge with a Manifest V3 extension, native messaging host, and task-
 
 ## Install
 
+For the global CLI:
+
+```bash
+npm install -g @ank1015/chrome-controller
+chrome-controller setup
+```
+
+For the TypeScript SDK in a project:
+
 ```bash
 npm install @ank1015/chrome-controller
 ```
@@ -11,10 +20,13 @@ npm install @ank1015/chrome-controller
 ## CLI
 
 ```bash
-npx @ank1015/chrome-controller --help
-npx @ank1015/chrome-controller session create --id demo
-npx @ank1015/chrome-controller tabs list --json
+chrome-controller --help
+chrome-controller setup
+chrome-controller session create --id demo
+chrome-controller tabs list --json
 ```
+
+The npm package requires Node.js on the target machine. If you need a no-Node install, use the standalone GitHub release artifacts instead.
 
 ## Library
 
@@ -22,4 +34,4 @@ npx @ank1015/chrome-controller tabs list --json
 import { connectChromeController } from '@ank1015/chrome-controller';
 ```
 
-See [`docs/06-sdk-automation-workflows.md`](./docs/06-sdk-automation-workflows.md) for SDK usage and automation patterns.
+See [`docs/README.md`](./docs/README.md) for the docs index, CLI guide, and SDK guide.

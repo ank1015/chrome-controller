@@ -8,6 +8,7 @@ declare const Element: any;
 declare const HTMLInputElement: any;
 declare const HTMLTextAreaElement: any;
 declare const HTMLSelectElement: any;
+declare const HTMLButtonElement: any;
 declare const Event: any;
 declare const MouseEvent: any;
 declare const getComputedStyle: (element: any) => any;
@@ -31,6 +32,8 @@ export interface DomOperationResult {
   visible?: boolean;
   enabled?: boolean;
   checked?: boolean | null;
+  submitted?: boolean;
+  strategy?: string | null;
   box?: {
     x: number;
     y: number;
@@ -328,6 +331,90 @@ function domOperationRuntime(request: {
     return normalized ? normalized : null;
   };
 
+  const isElementNode = (element: any): boolean =>
+    Boolean(element && typeof element === 'object' && element.nodeType === 1);
+
+  const getElementDocument = (element: any): any =>
+    element?.ownerDocument ?? document;
+
+  const getElementWindow = (element: any): any =>
+    getElementDocument(element)?.defaultView ?? window;
+
+  const isInputElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'input';
+
+  const isTextAreaElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'textarea';
+
+  const isSelectElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'select';
+
+  const isButtonElement = (element: any): boolean =>
+    isElementNode(element) && String(element.tagName || '').toLowerCase() === 'button';
+
+  const isFrameElement = (element: any): boolean => {
+    const tagName = String(element?.tagName || '').toLowerCase();
+    return tagName === 'iframe' || tagName === 'frame';
+  };
+
+  const queryAll = (queryDocument: any, selector: string): any[] => {
+    if (!queryDocument || typeof queryDocument.querySelectorAll !== 'function') {
+      return [];
+    }
+
+    try {
+      return Array.from(queryDocument.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  };
+
+  const getAccessibleFrameDocument = (frameElement: any): any | null => {
+    if (!isFrameElement(frameElement)) {
+      return null;
+    }
+
+    try {
+      const frameDocument =
+        frameElement.contentDocument ?? frameElement.contentWindow?.document ?? null;
+      return frameDocument && frameDocument.documentElement ? frameDocument : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveSelectorMatches = (selector: string): any[] => {
+    const segments = selector
+      .split(/\s*>>>\s*/g)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (segments.length === 0) {
+      return [];
+    }
+
+    let documents = [document];
+    for (const frameSelector of segments.slice(0, -1)) {
+      const nextDocuments: any[] = [];
+
+      for (const queryDocument of documents) {
+        for (const frameElement of queryAll(queryDocument, frameSelector)) {
+          const frameDocument = getAccessibleFrameDocument(frameElement);
+          if (frameDocument) {
+            nextDocuments.push(frameDocument);
+          }
+        }
+      }
+
+      documents = nextDocuments;
+      if (documents.length === 0) {
+        return [];
+      }
+    }
+
+    const targetSelector = segments[segments.length - 1];
+    return documents.flatMap((queryDocument) => queryAll(queryDocument, targetSelector));
+  };
+
   const resolveElement = (): {
     element: any;
     matchedSelector: string | null;
@@ -337,7 +424,7 @@ function domOperationRuntime(request: {
 
     for (const selector of selectors) {
       try {
-        const matches = Array.from(document.querySelectorAll(selector));
+        const matches = resolveSelectorMatches(selector);
         if (matches.length === 1) {
           return {
             element: matches[0],
@@ -346,6 +433,24 @@ function domOperationRuntime(request: {
           };
         }
         if (matches.length > 1) {
+          const visibleMatches = matches.filter((candidate) => isVisible(candidate));
+          if (visibleMatches.length === 1) {
+            return {
+              element: visibleMatches[0],
+              matchedSelector: selector,
+              hadAmbiguousSelector,
+            };
+          }
+
+          const enabledVisibleMatches = visibleMatches.filter((candidate) => isEnabled(candidate));
+          if (enabledVisibleMatches.length === 1) {
+            return {
+              element: enabledVisibleMatches[0],
+              matchedSelector: selector,
+              hadAmbiguousSelector,
+            };
+          }
+
           hadAmbiguousSelector = true;
         }
       } catch {
@@ -374,12 +479,16 @@ function domOperationRuntime(request: {
     return `Could not find element for selectors: ${selectors.join(', ')}`;
   };
 
-  const isVisible = (element: any): boolean => {
-    if (!element || !(element instanceof Element)) {
+  const isStrictlyVisible = (element: any): boolean => {
+    if (!isElementNode(element)) {
       return false;
     }
 
-    const style = getComputedStyle(element);
+    const view = getElementWindow(element);
+    const style =
+      typeof view?.getComputedStyle === 'function'
+        ? view.getComputedStyle(element)
+        : getComputedStyle(element);
     if (
       style.display === 'none' ||
       style.visibility === 'hidden' ||
@@ -392,6 +501,63 @@ function domOperationRuntime(request: {
     return rect.width > 0 && rect.height > 0 && element.getClientRects().length > 0;
   };
 
+  const supportsAncestorVisibilityFallback = (element: any): boolean => {
+    if (!isElementNode(element)) {
+      return false;
+    }
+
+    if (isTextAreaElement(element) || isSelectElement(element)) {
+      return true;
+    }
+
+    if (isInputElement(element)) {
+      const type = (element.type || 'text').toLowerCase();
+      return ![
+        'hidden',
+        'checkbox',
+        'radio',
+        'range',
+        'button',
+        'submit',
+        'reset',
+        'image',
+        'file',
+      ].includes(type);
+    }
+
+    if (element.isContentEditable) {
+      return true;
+    }
+
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    return role === 'textbox' || role === 'searchbox' || role === 'combobox';
+  };
+
+  const hasVisibleAncestor = (element: any): boolean => {
+    let current = element?.parentElement ?? null;
+
+    while (current) {
+      if (isStrictlyVisible(current)) {
+        return true;
+      }
+      current = current.parentElement ?? null;
+    }
+
+    return false;
+  };
+
+  const isVisible = (element: any): boolean => {
+    if (!isElementNode(element)) {
+      return false;
+    }
+
+    if (isStrictlyVisible(element)) {
+      return true;
+    }
+
+    return supportsAncestorVisibilityFallback(element) && hasVisibleAncestor(element);
+  };
+
   const isEnabled = (element: any): boolean =>
     !(
       element.hasAttribute('disabled') ||
@@ -400,7 +566,7 @@ function domOperationRuntime(request: {
     );
 
   const getChecked = (element: any): boolean | null => {
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
       const type = (element.type || '').toLowerCase();
       if (type === 'checkbox' || type === 'radio') {
         return element.checked;
@@ -420,8 +586,9 @@ function domOperationRuntime(request: {
 
   const getBox = (element: any) => {
     const rect = element.getBoundingClientRect();
-    const viewportWidth = Number(window.innerWidth) || 0;
-    const viewportHeight = Number(window.innerHeight) || 0;
+    const view = getElementWindow(element);
+    const viewportWidth = Number(view?.innerWidth ?? window.innerWidth) || 0;
+    const viewportHeight = Number(view?.innerHeight ?? window.innerHeight) || 0;
 
     return {
       x: Math.round(rect.x),
@@ -442,6 +609,41 @@ function domOperationRuntime(request: {
     };
   };
 
+  const findVisibleBoxElement = (element: any): any => {
+    if (!isElementNode(element)) {
+      return element;
+    }
+
+    if (isStrictlyVisible(element)) {
+      return element;
+    }
+
+    try {
+      if (typeof element.querySelectorAll === 'function') {
+        const descendant = Array.from(element.querySelectorAll('*')).find((candidate: any) =>
+          isStrictlyVisible(candidate)
+        );
+        if (descendant) {
+          return descendant;
+        }
+      }
+    } catch {
+      // ignore invalid descendant traversal
+    }
+
+    let current = element.parentElement ?? null;
+    while (current) {
+      if (isStrictlyVisible(current)) {
+        return current;
+      }
+      current = current.parentElement ?? null;
+    }
+
+    return element;
+  };
+
+  const getDisplayBox = (element: any) => getBox(findVisibleBoxElement(element));
+
   const scrollIntoView = (element: any): void => {
     if (typeof element.scrollIntoView === 'function') {
       element.scrollIntoView({
@@ -460,7 +662,7 @@ function domOperationRuntime(request: {
   };
 
   const placeCaretAtEnd = (element: any): void => {
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       const length = typeof element.value === 'string' ? element.value.length : 0;
       if (typeof element.setSelectionRange === 'function') {
         element.setSelectionRange(length, length);
@@ -472,12 +674,14 @@ function domOperationRuntime(request: {
       return;
     }
 
-    const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
-    if (!selection || typeof document.createRange !== 'function') {
+    const ownerDocument = getElementDocument(element);
+    const view = getElementWindow(element);
+    const selection = typeof view?.getSelection === 'function' ? view.getSelection() : null;
+    if (!selection || typeof ownerDocument?.createRange !== 'function') {
       return;
     }
 
-    const range = document.createRange();
+    const range = ownerDocument.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
     selection.removeAllRanges();
@@ -489,10 +693,96 @@ function domOperationRuntime(request: {
     element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   };
 
+  const isSingleLineSubmitControl = (element: any): boolean => {
+    if (isTextAreaElement(element) || element?.isContentEditable) {
+      return false;
+    }
+
+    if (isInputElement(element)) {
+      const type = (element.type || 'text').toLowerCase();
+      return ![
+        'hidden',
+        'checkbox',
+        'radio',
+        'range',
+        'button',
+        'submit',
+        'reset',
+        'image',
+        'file',
+      ].includes(type);
+    }
+
+    const role = (element?.getAttribute?.('role') || '').toLowerCase();
+    return role === 'textbox' || role === 'searchbox' || role === 'combobox';
+  };
+
+  const findAssociatedForm = (element: any): any => {
+    if (element?.form) {
+      return element.form;
+    }
+
+    if (typeof element?.closest === 'function') {
+      return element.closest('form');
+    }
+
+    return null;
+  };
+
+  const submitElement = (
+    element: any
+  ): {
+    submitted: boolean;
+    strategy: string | null;
+  } => {
+    if (isSingleLineSubmitControl(element)) {
+      const form = findAssociatedForm(element);
+      if (form && typeof form.requestSubmit === 'function') {
+        form.requestSubmit();
+        return {
+          submitted: true,
+          strategy: 'requestSubmit',
+        };
+      }
+      if (form && typeof form.submit === 'function') {
+        form.submit();
+        return {
+          submitted: true,
+          strategy: 'submit',
+        };
+      }
+    }
+
+    if (isButtonElement(element)) {
+      element.click();
+      return {
+        submitted: true,
+        strategy: 'click',
+      };
+    }
+
+    if (isInputElement(element)) {
+      const type = (element.type || '').toLowerCase();
+      if (type === 'submit' || type === 'button' || type === 'image') {
+        element.click();
+        return {
+          submitted: true,
+          strategy: 'click',
+        };
+      }
+    }
+
+    return {
+      submitted: false,
+      strategy: null,
+    };
+  };
+
   const setElementValue = (element: any, nextValue: string): void => {
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
+      const view = getElementWindow(element);
       const descriptor = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
+        view.HTMLInputElement?.prototype ?? window.HTMLInputElement?.prototype,
         'value'
       );
       if (descriptor?.set) {
@@ -501,9 +791,10 @@ function domOperationRuntime(request: {
       }
     }
 
-    if (element instanceof HTMLTextAreaElement) {
+    if (isTextAreaElement(element)) {
+      const view = getElementWindow(element);
       const descriptor = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
+        view.HTMLTextAreaElement?.prototype ?? window.HTMLTextAreaElement?.prototype,
         'value'
       );
       if (descriptor?.set) {
@@ -526,10 +817,10 @@ function domOperationRuntime(request: {
   };
 
   const getElementValue = (element: any): string | null => {
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       return typeof element.value === 'string' ? element.value : null;
     }
-    if (element instanceof HTMLSelectElement) {
+    if (isSelectElement(element)) {
       return typeof element.value === 'string' ? element.value : null;
     }
     if (element.isContentEditable) {
@@ -550,12 +841,13 @@ function domOperationRuntime(request: {
     detail: number
   ): void => {
     const box = getBox(element);
+    const view = getElementWindow(element);
     element.dispatchEvent(
       new MouseEvent(type, {
         bubbles: true,
         cancelable: true,
         composed: true,
-        view: window,
+        view,
         button,
         buttons,
         detail,
@@ -609,7 +901,7 @@ function domOperationRuntime(request: {
       return {
         ok: true,
         matchedSelector,
-        box: getBox(element),
+        box: getDisplayBox(element),
       };
     }
 
@@ -650,7 +942,7 @@ function domOperationRuntime(request: {
     }
 
     if (operation === 'select') {
-      if (!(element instanceof HTMLSelectElement)) {
+      if (!isSelectElement(element)) {
         throw new Error('Target element is not a select element');
       }
 
@@ -688,7 +980,7 @@ function domOperationRuntime(request: {
         };
       }
 
-      if (element instanceof HTMLInputElement) {
+      if (isInputElement(element)) {
         const type = (element.type || '').toLowerCase();
         if (type === 'radio' && !nextChecked) {
           throw new Error('Radio inputs cannot be unchecked directly');
@@ -718,9 +1010,36 @@ function domOperationRuntime(request: {
       };
     }
 
-    if (operation === 'click' || operation === 'dblclick' || operation === 'rightclick') {
+    if (operation === 'click') {
       scrollIntoView(element);
       focusElement(element);
+      const box = getDisplayBox(element);
+      const button = 0;
+      const buttons = 1;
+      const detail = 1;
+
+      dispatchMouse(element, 'mouseover', button, buttons, detail);
+      dispatchMouse(element, 'mousemove', button, buttons, detail);
+      dispatchMouse(element, 'mousedown', button, buttons, detail);
+      dispatchMouse(element, 'mouseup', button, 0, detail);
+
+      if (typeof element.click === 'function') {
+        element.click();
+      } else {
+        dispatchMouse(element, 'click', button, 0, detail);
+      }
+
+      return {
+        ok: true,
+        matchedSelector,
+        box,
+      };
+    }
+
+    if (operation === 'dblclick' || operation === 'rightclick') {
+      scrollIntoView(element);
+      focusElement(element);
+      const box = getDisplayBox(element);
       const button = operation === 'rightclick' ? 2 : 0;
       const buttons = operation === 'rightclick' ? 2 : 1;
       const detail = operation === 'dblclick' ? 2 : 1;
@@ -731,20 +1050,16 @@ function domOperationRuntime(request: {
       dispatchMouse(element, 'mouseup', button, 0, detail);
       dispatchMouse(
         element,
-        operation === 'rightclick' ? 'contextmenu' : operation === 'dblclick' ? 'dblclick' : 'click',
+        operation === 'rightclick' ? 'contextmenu' : 'dblclick',
         button,
         0,
         detail
       );
 
-      if (operation !== 'rightclick' && typeof element.click === 'function') {
-        element.click();
-      }
-
       return {
         ok: true,
         matchedSelector,
-        box: getBox(element),
+        box,
       };
     }
 
@@ -755,7 +1070,19 @@ function domOperationRuntime(request: {
       return {
         ok: true,
         matchedSelector,
-        box: getBox(element),
+        box: getDisplayBox(element),
+      };
+    }
+
+    if (operation === 'submit') {
+      scrollIntoView(element);
+      focusElement(element);
+      const submission = submitElement(element);
+      return {
+        ok: submission.submitted,
+        matchedSelector,
+        submitted: submission.submitted,
+        strategy: submission.strategy,
       };
     }
 
@@ -818,7 +1145,7 @@ function domOperationRuntime(request: {
       scrollIntoView(element);
       return {
         matchedSelector,
-        box: getBox(element),
+        box: getDisplayBox(element),
       };
     }
 

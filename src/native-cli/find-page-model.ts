@@ -10,6 +10,18 @@ export interface FindPageTextSource extends Pick<PageTextCaptureResult, 'title' 
   markdown: string;
 }
 
+export interface FindPageSnapshotLlmInput {
+  query: string;
+  snapshotMarkdown: string;
+  limit: number;
+}
+
+export interface FindPageTextLlmInput {
+  query: string;
+  pageTextMarkdown: string;
+  limit: number;
+}
+
 export interface FindPageModelLlmInput {
   query: string;
   pageModelMarkdown: string;
@@ -54,6 +66,65 @@ export function createFindPageModelMarkdown(options: {
   }
 
   lines.push('', '## Visible page text');
+
+  const textBlock = normalizeFindTextBlock(
+    options.pageText.markdown,
+    options.textCharacterLimit ?? DEFAULT_FIND_PAGE_MODEL_TEXT_CHAR_LIMIT
+  );
+  if (textBlock.note) {
+    lines.push(textBlock.note, '');
+  }
+  lines.push(textBlock.markdown || 'No visible page text captured.');
+
+  return lines.join('\n');
+}
+
+export function createFindPageSnapshotMarkdown(options: {
+  snapshot: CliPageSnapshot;
+  elementLimit?: number;
+}): string {
+  const requestedElementLimit = options.elementLimit;
+  const safeElementLimit =
+    Number.isInteger(requestedElementLimit) && requestedElementLimit > 0
+      ? requestedElementLimit
+      : DEFAULT_FIND_PAGE_MODEL_ELEMENT_LIMIT;
+  const displayElements = options.snapshot.elements.slice(
+    0,
+    Math.min(options.snapshot.elements.length, safeElementLimit)
+  );
+  const lines = [
+    '# Interactive snapshot',
+    '',
+    `Title: ${options.snapshot.title ?? 'Untitled page'}`,
+    `URL: ${options.snapshot.url ?? 'Unknown URL'}`,
+    `Elements included: ${displayElements.length} of ${options.snapshot.count}`,
+    '',
+    '## Elements',
+  ];
+
+  if (displayElements.length === 0) {
+    lines.push('No interactive elements found.');
+  } else {
+    for (const element of displayElements) {
+      lines.push(formatFilteredSnapshotElementLine(element));
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function createFindPageTextMarkdown(options: {
+  pageText: FindPageTextSource;
+  textCharacterLimit?: number;
+}): string {
+  const lines = [
+    '# Page text',
+    '',
+    `Title: ${options.pageText.title ?? 'Untitled page'}`,
+    `URL: ${options.pageText.url ?? 'Unknown URL'}`,
+    '',
+    '## Visible text',
+  ];
 
   const textBlock = normalizeFindTextBlock(
     options.pageText.markdown,
@@ -133,6 +204,34 @@ function formatFindSnapshotElementLine(element: CliSnapshotElementInfo): string 
   return parts.join(' ');
 }
 
+function formatFilteredSnapshotElementLine(element: CliSnapshotElementInfo): string {
+  const headerParts = [element.role];
+
+  if (element.inputType) {
+    headerParts.push(`type="${element.inputType}"`);
+  }
+
+  let line = `${element.ref} [${headerParts.join(' ')}]`;
+
+  if (element.name) {
+    line += ` ${JSON.stringify(element.name)}`;
+  }
+
+  if (element.placeholder && element.placeholder !== element.name) {
+    line += ` placeholder=${JSON.stringify(element.placeholder)}`;
+  }
+
+  if (element.checked === true) {
+    line += ' checked';
+  }
+
+  if (element.disabled) {
+    line += ' disabled';
+  }
+
+  return line;
+}
+
 function normalizeWhitespace(value: string): string {
   return value.replace(/\r\n/g, '\n').trim();
 }
@@ -143,6 +242,32 @@ export async function runFindPageModelLlm(input: FindPageModelLlmInput): Promise
     reasoningEffort: 'low',
     system: buildFindPageModelSystemPrompt(input),
     messages: [userMessage(input.pageModelMarkdown)],
+  });
+  const text = getText(message).trim();
+
+  return text || FIND_PAGE_MODEL_LLM_FALLBACK;
+}
+
+export async function runFindPageSnapshotLlm(
+  input: FindPageSnapshotLlmInput
+): Promise<string> {
+  const message = await llm({
+    modelId: 'codex/gpt-5.4-mini',
+    reasoningEffort: 'low',
+    system: buildFindPageSnapshotSystemPrompt(input),
+    messages: [userMessage(input.snapshotMarkdown)],
+  });
+  const text = getText(message).trim();
+
+  return text || FIND_PAGE_MODEL_LLM_FALLBACK;
+}
+
+export async function runFindPageTextLlm(input: FindPageTextLlmInput): Promise<string> {
+  const message = await llm({
+    modelId: 'codex/gpt-5.4-mini',
+    reasoningEffort: 'low',
+    system: buildFindPageTextSystemPrompt(input),
+    messages: [userMessage(input.pageTextMarkdown)],
   });
   const text = getText(message).trim();
 
@@ -193,6 +318,55 @@ export function buildFindPageModelSystemPrompt(input: FindPageModelLlmInput): st
     '',
     'Create one target section for each distinct requested target you identify.',
     'If a target has no useful element or text candidates, omit that subsection but still include the target if you found something for it.',
+  ].join('\n');
+}
+
+export function buildFindPageSnapshotSystemPrompt(
+  input: FindPageSnapshotLlmInput
+): string {
+  return [
+    'You are the semantic retrieval layer for interactive page snapshots in a Chrome control CLI.',
+    `User intent: ${JSON.stringify(input.query)}`,
+    `Maximum results to return: ${input.limit}`,
+    '',
+    'You will receive a markdown list of interactive snapshot elements from the current page.',
+    'Return a filtered shortlist of the most relevant exact element lines for the intent.',
+    '',
+    'Rules:',
+    '- Use only information present in the provided snapshot markdown.',
+    '- Preserve every returned element line exactly as it appears in the snapshot.',
+    '- Keep refs like @e1 exactly.',
+    '- Prefer main-content matches over header, nav, footer, or repeated chrome unless the intent suggests otherwise.',
+    '- Prefer over-inclusion to under-inclusion when the query implies a workflow, dialog, draft, or multi-step task.',
+    '- When the intent includes action words like send, attach, submit, save, continue, search, or next, prioritize actionable controls alongside matching fields.',
+    '- When the intent suggests an open composer, modal, or dialog, prefer controls that belong to that active workflow, including adjacent footer or toolbar actions.',
+    '- When the intent contains multiple related targets, you may group matches into short markdown sections.',
+    '- Return at most the requested number of element lines.',
+    '- Output markdown only.',
+    `- If nothing is relevant, return exactly: ${FIND_PAGE_MODEL_LLM_FALLBACK}`,
+  ].join('\n');
+}
+
+export function buildFindPageTextSystemPrompt(input: FindPageTextLlmInput): string {
+  return [
+    'You are the semantic retrieval layer for visible page text in a Chrome control CLI.',
+    `User intent: ${JSON.stringify(input.query)}`,
+    `Maximum results to return: ${input.limit}`,
+    '',
+    'You will receive markdown extracted from the visible page text.',
+    'Return the most relevant exact text statements, headings, or tight excerpts for the intent.',
+    '',
+    'Rules:',
+    '- Use only information present in the provided page text.',
+    '- Preserve the exact wording from the page text. Do not paraphrase, summarize, or normalize wording.',
+    '- Prefer exact heading lines or tight exact excerpts over broad summaries.',
+    '- It is okay to return slightly longer exact excerpts when surrounding details are needed to keep the result useful.',
+    '- Keep related details together when the query is about items like emails, jobs, dates, compensation, locations, status, or other multi-field records.',
+    '- Prefer main-content matches over header, nav, footer, or repeated chrome unless the intent suggests otherwise.',
+    '- When the intent contains multiple related targets, you may group matches into short markdown sections.',
+    '- Return at most the requested number of text items.',
+    '- Output markdown only.',
+    `- If nothing is relevant, return exactly: ${FIND_PAGE_MODEL_LLM_FALLBACK}`,
   ].join('\n');
 }
 

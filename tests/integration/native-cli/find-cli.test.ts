@@ -67,7 +67,7 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
 
   async listTabs(
     session: CliSessionRecord,
-    options: CliListTabsOptions = { currentWindow: true }
+    options: CliListTabsOptions = { windowId: 11 }
   ): Promise<CliTabInfo[]> {
     this.calls.push({
       method: 'listTabs',
@@ -91,6 +91,27 @@ class MockBrowserService extends BaseMockBrowserService implements BrowserServic
     }
 
     return { ...tab };
+  }
+
+  async activateTab(session: CliSessionRecord, tabId: number): Promise<CliTabInfo> {
+    this.calls.push({
+      method: 'activateTab',
+      sessionId: session.id,
+      payload: tabId,
+    });
+
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Missing tab ${tabId}`);
+    }
+
+    for (const candidate of this.tabs.values()) {
+      if (candidate.windowId === tab.windowId) {
+        candidate.active = candidate.id === tabId;
+      }
+    }
+
+    return { ...tab, active: true };
   }
 
   async evaluateTab(
@@ -190,7 +211,7 @@ async function runCliCommand(
   };
 }
 
-describe('native CLI find command', () => {
+describe('native CLI filtered page retrieval', () => {
   let tempHome: string;
   let now: () => Date;
   let browserService: MockBrowserService;
@@ -218,9 +239,9 @@ describe('native CLI find command', () => {
     await rm(tempHome, { recursive: true, force: true });
   });
 
-  it('builds a page model, returns the llm-ranked result, and refreshes the snapshot cache', async () => {
+  it('filters page snapshot output with --find and refreshes the snapshot cache', async () => {
     const outcome = await runCliCommand(
-      ['find', 'search box and sign in button', '--json'],
+      ['page', 'snapshot', '--find', 'search box and sign in button', '--json'],
       tempHome,
       browserService,
       now
@@ -240,17 +261,14 @@ describe('native CLI find command', () => {
         '- Welcome back',
       ].join('\n')
     );
-    expect(payload.data.pageModelMarkdown).toContain('## Interactive elements');
-    expect(payload.data.pageModelMarkdown).toContain(
-      '- @e1 [textbox type="email"] "Email" selector="#email"'
-    );
-    expect(payload.data.pageModelMarkdown).toContain('# Welcome back');
+    expect(payload.data.snapshotMarkdown).toContain('## Elements');
+    expect(payload.data.snapshotMarkdown).toContain('@e1 [textbox type="email"] "Email"');
     expect(payload.data.snapshotId).toEqual(expect.stringMatching(/^snap-101-/));
     expect(
       browserService.calls.filter((call) => call.method === 'evaluateTab')
-    ).toHaveLength(4);
+    ).toHaveLength(2);
     expect(llmMock).toHaveBeenCalledTimes(1);
-    expect(userMessageMock).toHaveBeenCalledWith(payload.data.pageModelMarkdown);
+    expect(userMessageMock).toHaveBeenCalledWith(payload.data.snapshotMarkdown);
 
     const cachedSnapshot = JSON.parse(
       await readFile(
@@ -276,9 +294,19 @@ describe('native CLI find command', () => {
     ]);
   });
 
-  it('supports explicit tab selection and forwards the requested result limit', async () => {
+  it('filters page text output with --find and follows the session current tab', async () => {
+    await runCliCommand(['session', 'create', '--id', 'alpha', '--json'], tempHome, browserService, now);
+    await runCliCommand(
+      ['tabs', 'use', '102', '--session', 'alpha', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+
+    browserService.calls.length = 0;
+
     const outcome = await runCliCommand(
-      ['find', 'email field', '--tab', '102', '--limit', '30', '--json'],
+      ['page', 'text', '--find', 'email field', '--limit', '30', '--session', 'alpha', '--json'],
       tempHome,
       browserService,
       now
@@ -289,11 +317,15 @@ describe('native CLI find command', () => {
     expect(payload.data.tabId).toBe(102);
     expect(payload.data.query).toBe('email field');
     expect(payload.data.limit).toBe(30);
+    expect(payload.data.pageTextMarkdown).toContain('## Visible text');
+    expect(payload.data.pageTextMarkdown).toContain('Welcome back');
     expect(payload.data.resultMarkdown).toContain('## Relevant elements');
-    expect(browserService.calls[0]).toEqual({
-      method: 'getTab',
-      sessionId: 's1',
-      payload: 102,
+    expect(browserService.calls.filter((call) => call.method !== 'getWindow')[0]).toEqual({
+      method: 'listTabs',
+      sessionId: 'alpha',
+      payload: {
+        windowId: 11,
+      },
     });
     expect(
       browserService.calls.filter((call) => call.method === 'evaluateTab').every((call) =>
@@ -305,5 +337,20 @@ describe('native CLI find command', () => {
         )
       )
     ).toBe(true);
+  });
+
+  it('keeps page find working as a compatibility alias', async () => {
+    const outcome = await runCliCommand(
+      ['page', 'find', 'email field', '--json'],
+      tempHome,
+      browserService,
+      now
+    );
+    const payload = JSON.parse(outcome.stdout);
+
+    expect(outcome.exitCode).toBe(0);
+    expect(payload.data.query).toBe('email field');
+    expect(payload.data.pageModelMarkdown).toContain('## Interactive elements');
+    expect(payload.data.pageModelMarkdown).toContain('## Visible page text');
   });
 });
