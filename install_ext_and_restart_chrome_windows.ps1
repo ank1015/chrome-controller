@@ -87,8 +87,8 @@ function Clear-ExternalUninstallBlock {
 
   $js = @'
 const fs = require("fs");
-const prefsPath = process.argv[1];
-const extId = process.argv[2];
+const prefsPath = process.argv[2];
+const extId = process.argv[3];
 const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
 
 if (!prefs.extensions || typeof prefs.extensions !== "object") {
@@ -108,7 +108,8 @@ fs.renameSync(tmpPath, prefsPath);
   $tempScriptPath = Join-Path $env:TEMP "chrome-controller-clear-external-uninstall-$([System.Guid]::NewGuid().ToString('N')).cjs"
 
   try {
-    Set-Content -LiteralPath $tempScriptPath -Value $js -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tempScriptPath, $js, $utf8NoBom)
 
     & $NodePath $tempScriptPath $PrefsPath $ExtensionId
     if ($LASTEXITCODE -ne 0) {
