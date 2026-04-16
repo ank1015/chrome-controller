@@ -1,6 +1,6 @@
 {
   "name": "@ank1015/chrome-controller",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Chrome RPC bridge with a Manifest V3 extension, native messaging host, and CLI",
   "type": "module",
   "main": "./dist/index.js",

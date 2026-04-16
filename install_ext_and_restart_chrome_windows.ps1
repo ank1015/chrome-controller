@@ -105,9 +105,20 @@ fs.writeFileSync(tmpPath, JSON.stringify(prefs));
 fs.renameSync(tmpPath, prefsPath);
 '@
 
-  & $NodePath -e $js $PrefsPath $ExtensionId
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to update Chrome Preferences: $PrefsPath"
+  $tempScriptPath = Join-Path $env:TEMP "chrome-controller-clear-external-uninstall-$([System.Guid]::NewGuid().ToString('N')).cjs"
+
+  try {
+    Set-Content -LiteralPath $tempScriptPath -Value $js -Encoding UTF8
+
+    & $NodePath $tempScriptPath $PrefsPath $ExtensionId
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to update Chrome Preferences: $PrefsPath"
+    }
+  }
+  finally {
+    if (Test-Path -LiteralPath $tempScriptPath -PathType Leaf) {
+      Remove-Item -LiteralPath $tempScriptPath -Force -ErrorAction SilentlyContinue
+    }
   }
 }
 
